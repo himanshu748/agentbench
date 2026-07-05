@@ -34,7 +34,7 @@ python3 cli/agentbench.py run suites/customer-support.yaml \
 
 ```yaml
 # .github/workflows/prompt-ci.yml
-- uses: himanshujha/agentbench@v1
+- uses: himanshu748/agentbench@v1
   with:
     suite: suites/customer-support.yaml
     models: openai/gpt-4o-mini,anthropic/claude-haiku-4.5
