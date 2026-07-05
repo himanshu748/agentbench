@@ -98,7 +98,7 @@ async def judge(category: str, test_input: str, response: str,
         judge_model,
         [{"role": "system", "content": JUDGE_SYSTEM},
          {"role": "user", "content": user_msg}],
-        json_mode=True,
+        json_mode=True, label=f"judge:{category}",
     )
     if result["error"]:
         return {"pass": False, "confidence": 0.0, "reason": f"Judge error: {result['error']}"}
@@ -121,5 +121,5 @@ async def suggest_fix(system_prompt: str, failures: list,
         {"role": "user", "content":
          f"Current system prompt:\n{system_prompt}\n\nFailing cases:\n{fail_desc}\n\n"
          "Rewrite the system prompt to fix these failures while keeping its original purpose."},
-    ])
+    ], label="fix")
     return result["content"] if not result["error"] else f"(fix suggestion failed: {result['error']})"

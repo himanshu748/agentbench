@@ -98,11 +98,14 @@ def _estimate_cost(model: str, in_tok: int, out_tok: int) -> float:
 
 
 async def chat(model: str, messages: list, json_mode: bool = False,
-               timeout: float = 45.0) -> ChatResult:
+               timeout: float = 45.0, label: str = "call") -> ChatResult:
     if MOCK:
         return await _mock_chat(model, messages, json_mode)
 
-    payload = {"model": model, "messages": messages}
+    # `user` labels each request in MeshAPI's dashboard logs so test, judge,
+    # fix, and red-team traffic are distinguishable instead of looking like
+    # bursts of duplicate calls.
+    payload = {"model": model, "messages": messages, "user": f"agentbench:{label}"}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
 
@@ -111,7 +114,8 @@ async def chat(model: str, messages: list, json_mode: bool = False,
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(
                 f"{MESH_BASE_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {MESH_API_KEY}"},
+                headers={"Authorization": f"Bearer {MESH_API_KEY}",
+                         "User-Agent": "AgentBench/1.0 (+https://agentbench-three.vercel.app)"},
                 json=payload,
             )
             data = r.json()

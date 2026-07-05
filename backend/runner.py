@@ -19,7 +19,7 @@ async def _run_one(sem: asyncio.Semaphore, system_prompt: str, test: dict, model
         resp = await mesh_client.chat(model, [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": _mock_tag(test)},
-        ])
+        ], label=f"test:{test['category']}")
     base = {
         "input": test["input"], "category": test["category"], "model": model,
         "latency_ms": resp["latency_ms"], "cost_usd": resp["cost_usd"],
