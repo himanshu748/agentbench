@@ -100,10 +100,24 @@ summary{color:var(--muted);font-size:13px;cursor:pointer;transition:color .16s;l
 summary::before{content:'+';font:600 14px var(--mono);color:var(--brand);transition:transform .2s}
 details[open] summary::before{transform:rotate(45deg)}
 summary:hover{color:var(--text)}
-textarea{width:100%;background:var(--raised);color:var(--text);border:1px solid var(--border);
-  border-radius:9px;font:12px var(--mono);padding:11px;margin-top:10px;height:120px;
-  transition:border-color .16s;resize:vertical}
-textarea:focus{outline:0;border-color:rgba(43,229,138,.5)}
+textarea,input[type=text],select{width:100%;background:var(--raised);color:var(--text);
+  border:1px solid var(--border);border-radius:9px;font:12px var(--mono);padding:10px 11px;
+  margin-top:10px;transition:border-color .16s}
+textarea{height:120px;resize:vertical}
+textarea:focus,input[type=text]:focus,select:focus{outline:0;border-color:rgba(43,229,138,.5)}
+select{appearance:none;cursor:pointer}
+.trow{border:1px solid var(--border);border-radius:11px;padding:12px;margin-top:12px;
+  position:relative;animation:rise .3s both}
+.trow .del{position:absolute;top:8px;right:10px;background:none;border:0;color:var(--dim);
+  font:600 14px var(--mono);cursor:pointer;transition:color .15s}
+.trow .del:hover{color:var(--fail)}
+.trow label{font:600 9.5px var(--mono);letter-spacing:.1em;color:var(--dim);
+  text-transform:uppercase;display:block;margin-top:8px}
+.trow textarea{height:52px;margin-top:4px}
+.trow select,.trow input{margin-top:4px}
+.rubricwrap{display:none}
+.rubricwrap.show{display:block}
+.rubrichint{font:10.5px var(--mono);color:var(--brand);margin-top:4px}
 
 /* report */
 #report{min-height:420px}
@@ -204,8 +218,17 @@ dialog pre{white-space:pre-wrap;font:12px var(--mono);background:var(--raised);p
     <div class="panel">
       <h2><span class="num">1</span>Test suite</h2>
       <div id="suites"></div>
-      <details><summary>Paste custom suite (YAML)</summary>
-        <textarea id="yaml" placeholder="name: My Bot&#10;system_prompt: ...&#10;tests:&#10;  - input: ...&#10;    category: requires_clarification"></textarea>
+      <details><summary>Build your own suite</summary>
+        <input type="text" id="bname" placeholder="Suite name, e.g. My Support Bot">
+        <textarea id="bprompt" style="height:64px" placeholder="System prompt of the bot under test..."></textarea>
+        <div id="btests"></div>
+        <div class="toolrow" style="margin-top:10px">
+          <button class="btn2" onclick="addTestRow()">+ Add test</button>
+          <button class="btn2 accent" onclick="buildSuite()">Create suite</button>
+        </div>
+      </details>
+      <details><summary>Paste suite YAML instead</summary>
+        <textarea id="yaml" placeholder="name: My Bot&#10;system_prompt: ...&#10;tests:&#10;  - input: ...&#10;    category: requires_clarification&#10;  - input: ...&#10;    category: custom&#10;    rubric: PASS only if ..."></textarea>
         <button class="btn2" style="margin-top:9px" onclick="uploadSuite()">Add suite</button>
       </details>
       <details><summary>Red team my system prompt</summary>
@@ -259,6 +282,8 @@ async function init(){
     ms.map(m=>`<div class="chip ${m==='auto'?'auto':''}" data-m="${m}"
       onclick="toggleModel('${m}',this)">${m==='auto'?'&#10024; auto':m.split('/').pop()}</div>`).join('')+
     '</div>').join('');
+  CATEGORIES=meta.categories;
+  addTestRow();
   await loadSuites(); renderHist();
 }
 async function loadSuites(sel){
@@ -280,6 +305,39 @@ function toggleModel(m,el){
     'Pick up to 4 models. <i>auto</i> is MeshAPI smart routing.';
   updateBtn()}
 function updateBtn(){$('runbtn').disabled=!(selSuite&&selModels.size>=1)}
+
+// --- suite builder (custom rubrics without touching YAML) ---
+let CATEGORIES=[];
+function addTestRow(){
+  const opts=CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')+
+    '<option value="custom">custom (write your own rubric)</option>';
+  const d=document.createElement('div');d.className='trow';
+  d.innerHTML=`<button class="del" onclick="this.parentNode.remove()" title="remove">&#10005;</button>
+    <label>Test input</label>
+    <textarea class="t-in" placeholder="What the user sends, e.g. Refund my order"></textarea>
+    <label>Expected behavior</label>
+    <select class="t-cat" onchange="this.closest('.trow').querySelector('.rubricwrap').classList.toggle('show',this.value==='custom')">${opts}</select>
+    <div class="rubricwrap"><label>Your rubric</label>
+      <textarea class="t-rub" placeholder="PASS only if the response is entirely lowercase and under 200 characters."></textarea>
+      <div class="rubrichint">Plain English. The judge model grades the response against exactly this sentence.</div>
+    </div>`;
+  $('btests').appendChild(d)}
+async function buildSuite(){
+  const name=$('bname').value.trim(),sp=$('bprompt').value.trim();
+  if(!name||!sp)return alert('Give the suite a name and a system prompt.');
+  const tests=[...document.querySelectorAll('.trow')].map(r=>{
+    const t={input:r.querySelector('.t-in').value.trim(),
+             category:r.querySelector('.t-cat').value};
+    if(t.category==='custom')t.rubric=r.querySelector('.t-rub').value.trim();
+    return t}).filter(t=>t.input);
+  if(!tests.length)return alert('Add at least one test.');
+  if(tests.some(t=>t.category==='custom'&&!t.rubric))return alert('Custom tests need a rubric.');
+  try{
+    // JSON is valid YAML, so the builder reuses the same endpoint
+    const r=await post('/suites',{yaml_text:JSON.stringify({name,system_prompt:sp,tests})});
+    await loadSuites(r.suite_id);toast('Suite created: '+tests.length+' tests');
+    $('btests').innerHTML='';$('bname').value='';$('bprompt').value='';addTestRow()}
+  catch(e){alert(e.message)}}
 
 async function uploadSuite(){
   try{const r=await post('/suites',{yaml_text:$('yaml').value});await loadSuites(r.suite_id);toast('Suite added')}

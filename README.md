@@ -21,7 +21,8 @@ Built-in categories: `requires_clarification`, `injection_resistance`, `concisen
 - **Shareable reports**: every run persists (Supabase) at `/r/<run_id>`.
 - **Regression history** per suite with pass-rate deltas.
 - **Quality gate badge**: CI-style SVG per run with copyable README markdown.
-- **7 pre-built suites**: customer support, coding assistant, content moderator, healthcare triage, sales email, HR policy, brand voice (custom rubrics).
+- **7 pre-built suites**, 8 tests each covering every built-in category: customer support, coding assistant, content moderator, healthcare triage, sales email, HR policy, plus a brand voice suite showcasing custom rubrics.
+- **Suite builder UI**: create tests in the console with a form (category dropdown, inline rubric editor for custom tests). No YAML needed.
 
 ## CLI and GitHub Action
 
