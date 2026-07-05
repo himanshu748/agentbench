@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentBench Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#07090D;--surface:#0C1016;--raised:#121826;--border:#1C2432;--text:#EDF1F7;
+  --muted:#8C97A9;--dim:#5C6878;--brand:#2BE58A;--brand2:#7CF5C8;--fail:#FF5D5D;--warn:#FFB224;
+  --link:#6FA8FF;--disp:'Space Grotesk',system-ui,sans-serif;--body:'Inter',system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font:15px/1.6 var(--body);
+  background-image:radial-gradient(rgba(140,151,169,.06) 1px,transparent 1px);background-size:32px 32px}
+a{color:inherit;text-decoration:none}
+nav{border-bottom:1px solid var(--border);background:rgba(7,9,13,.85)}
+nav .inner{max-width:1100px;margin:0 auto;padding:0 24px;display:flex;align-items:center;height:60px;gap:12px}
+.logo{font:700 18px var(--disp);display:flex;align-items:center;gap:9px}
+.logo .dot{width:9px;height:9px;border-radius:3px;background:var(--brand);box-shadow:0 0 12px var(--brand)}
+.crumb{font:500 12px var(--mono);color:var(--dim)}
+.cta{margin-left:auto;background:var(--brand);color:#06130C;font:600 13px var(--body);
+  padding:9px 16px;border-radius:9px}
+.wrap{max-width:1100px;margin:0 auto;padding:34px 24px 90px}
+h1{font:700 26px var(--disp);letter-spacing:-.02em;margin-bottom:4px}
+.sub{color:var(--dim);font:12px var(--mono);margin-bottom:22px}
+.reco{margin:16px 0 20px;padding:17px 20px;border-radius:13px;border:1px solid rgba(43,229,138,.5);
+  background:linear-gradient(90deg,rgba(43,229,138,.09),rgba(43,229,138,.03));display:flex;gap:14px;align-items:center}
+.reco b{color:var(--brand);font-family:var(--mono)}
+.reco .why{color:var(--muted);font:12.5px var(--mono)}
+table{width:100%;border-collapse:collapse;font-size:14px;background:var(--surface);
+  border:1px solid var(--border);border-radius:14px;overflow:hidden}
+th,td{padding:11px 12px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+th{color:var(--dim);font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.1em}
+.cell{border-radius:9px;padding:8px 10px}
+.cell.pass{background:rgba(43,229,138,.1);border:1px solid rgba(43,229,138,.5)}
+.cell.fail{background:rgba(255,93,93,.09);border:1px solid rgba(255,93,93,.5)}
+.cell.err{background:rgba(255,178,36,.09);border:1px solid rgba(255,178,36,.5)}
+.cell b{font:600 12.5px var(--body)}
+.cell small{display:block;color:var(--muted);font:10.5px var(--mono);margin-top:3px}
+.catlabel{font:600 10.5px var(--mono);color:var(--link)}
+.empty{color:var(--muted);padding:80px 0;text-align:center}
+.badgezone{margin-top:20px}
+.badgezone img{height:26px}
+</style>
+</head>
+<body>
+<nav><div class="inner">
+  <a class="logo" href="/"><span class="dot"></span>AgentBench</a>
+  <span class="crumb">/ shared report</span>
+  <a class="cta" href="/app">Run your own</a>
+</div></nav>
+<div class="wrap" id="main"><div class="empty">Loading report...</div></div>
+<script>
+const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+(async()=>{
+  const id=location.pathname.split('/').pop();
+  const r=await fetch('/api/shared/'+id);
+  const el=document.getElementById('main');
+  if(!r.ok){el.innerHTML='<div class="empty">Report not found. It may not have been shared.</div>';return}
+  const run=await r.json(),s=run.summary,models=run.models;
+  const inputs=[...new Map(run.results.map(x=>[x.input,x])).values()];
+  const byKey={};run.results.forEach(x=>byKey[x.input+'|'+x.model]=x);
+  const best=s.per_model.find(p=>p.model===s.recommended);
+  let html=`<h1>${esc(run.suite_name||'Benchmark report')}</h1>
+    <div class="sub">run ${id} &middot; ${run.results.length} cells &middot; judged behavior via MeshAPI</div>
+    <div class="reco"><span style="font-size:24px">&#127942;</span><div>
+      Ship <b>${s.recommended}</b><br><span class="why">${esc(s.reason)}</span></div></div>
+    <div style="overflow-x:auto"><table><tr><th style="min-width:200px">Test case</th>`+
+    models.map(m=>`<th>${m==='auto'?'&#10024; auto':m.split('/').pop()}</th>`).join('')+'</tr>';
+  for(const row of inputs){
+    html+=`<tr><td><span class="catlabel">${row.category}</span><br>${esc(row.input.slice(0,90))}${row.input.length>90?'...':''}</td>`;
+    for(const m of models){
+      const x=byKey[row.input+'|'+m];
+      const cls=x.status==='error'?'err':(x.pass?'pass':'fail');
+      const label=x.status==='error'?'&#9888; error':(x.pass?'&#10003; pass':'&#10007; fail');
+      html+=`<td><div class="cell ${cls}"><b>${label}</b><small>${x.latency_ms}ms &middot; $${x.cost_usd.toFixed(5)}</small></div></td>`}
+    html+='</tr>'}
+  html+=`</table></div>
+    <div class="badgezone"><img src="/api/badge.svg?label=${encodeURIComponent(run.suite_name||'suite')}&passed=${best.passed}&total=${best.total}"></div>`;
+  el.innerHTML=html;
+  document.title='AgentBench &middot; '+(run.suite_name||'report');
+})();
+</script>
+</body>
+</html>

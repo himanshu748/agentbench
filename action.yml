@@ -1,0 +1,25 @@
+name: "AgentBench"
+description: "Fail the build when your AI prompt regresses. Behavior tests across models via MeshAPI."
+branding:
+  icon: "check-circle"
+  color: "green"
+inputs:
+  suite:
+    description: "Path to the suite YAML in your repo (or a built-in suite id)"
+    required: true
+  models:
+    description: "Comma-separated MeshAPI model ids"
+    required: true
+  url:
+    description: "AgentBench server URL"
+    required: false
+    default: "https://agentbench-three.vercel.app"
+runs:
+  using: "composite"
+  steps:
+    - name: Run behavior tests
+      shell: bash
+      env:
+        AGENTBENCH_URL: ${{ inputs.url }}
+      run: |
+        python3 ${{ github.action_path }}/cli/agentbench.py run "${{ inputs.suite }}" --models "${{ inputs.models }}"

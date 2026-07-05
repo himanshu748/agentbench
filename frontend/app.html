@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentBench Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07090D; --surface:#0C1016; --raised:#121826; --border:#1C2432; --border2:#2A3547;
+  --text:#EDF1F7; --muted:#8C97A9; --dim:#5C6878;
+  --brand:#2BE58A; --brand2:#7CF5C8; --fail:#FF5D5D; --warn:#FFB224; --link:#6FA8FF;
+  --disp:'Space Grotesk',system-ui,sans-serif; --body:'Inter',system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font:15px/1.6 var(--body);
+  background-image:radial-gradient(rgba(140,151,169,.06) 1px,transparent 1px);
+  background-size:32px 32px;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+.orb{position:fixed;border-radius:50%;filter:blur(120px);pointer-events:none;z-index:0}
+.orb.a{width:480px;height:480px;background:rgba(43,229,138,.06);top:-140px;left:-120px}
+.orb.b{width:420px;height:420px;background:rgba(111,168,255,.045);bottom:-160px;right:-160px}
+
+nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(16px);
+  background:rgba(7,9,13,.82);border-bottom:1px solid var(--border)}
+nav .inner{max-width:1320px;margin:0 auto;padding:0 26px;display:flex;align-items:center;height:62px;gap:16px}
+.logo{font:700 18px var(--disp);letter-spacing:-.02em;display:flex;align-items:center;gap:9px}
+.logo .dot{width:9px;height:9px;border-radius:3px;background:var(--brand);
+  box-shadow:0 0 12px var(--brand);animation:blink 2.4s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+.crumb{font:500 12px var(--mono);color:var(--dim);letter-spacing:.06em}
+.navr{margin-left:auto;display:flex;gap:16px;align-items:center}
+.backlink{font:500 13px var(--body);color:var(--muted);transition:color .18s}
+.backlink:hover{color:var(--text)}
+.judgechip{font:500 11px var(--mono);color:var(--muted);border:1px solid var(--border);
+  border-radius:16px;padding:4px 12px;background:rgba(18,24,38,.6)}
+.judgechip i{font-style:normal;color:var(--brand)}
+.mockbadge{font:11px var(--mono);color:var(--warn);border:1px solid var(--warn);
+  border-radius:20px;padding:3px 10px;display:none}
+
+.wrap{max-width:1320px;margin:0 auto;padding:28px 26px 100px;position:relative;z-index:1}
+.grid{display:grid;grid-template-columns:360px 1fr;gap:22px;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;
+  animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
+.panel:nth-child(2){animation-delay:.08s}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+h2{font:600 11px var(--mono);text-transform:uppercase;letter-spacing:1.6px;color:var(--muted);
+  margin-bottom:15px;display:flex;align-items:center;gap:10px}
+h2 .num{width:22px;height:22px;border-radius:7px;background:rgba(43,229,138,.12);
+  border:1px solid rgba(43,229,138,.35);color:var(--brand);display:grid;place-items:center;
+  font:700 11px var(--mono)}
+
+.suite{padding:13px 15px;border:1px solid var(--border);border-radius:11px;cursor:pointer;
+  margin-bottom:9px;transition:all .18s;position:relative;overflow:hidden}
+.suite::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--brand);
+  transform:scaleY(0);transition:transform .2s;border-radius:0 2px 2px 0}
+.suite:hover{transform:translateX(3px);border-color:var(--border2)}
+.suite.sel{border-color:rgba(43,229,138,.5);background:var(--raised)}
+.suite.sel::before{transform:scaleY(1)}
+.suite b{display:block;font:600 14.5px var(--body)}
+.suite span{color:var(--muted);font:12px var(--mono)}
+.suite .tag{float:right;font:600 9.5px var(--mono);letter-spacing:.1em;color:var(--warn);
+  border:1px solid rgba(255,178,36,.4);border-radius:10px;padding:2px 8px;margin-top:2px}
+
+.prov{font:600 10px var(--mono);letter-spacing:.12em;color:var(--dim);text-transform:uppercase;
+  margin:12px 0 7px}
+.prov:first-child{margin-top:0}
+.models{display:flex;flex-wrap:wrap;gap:7px}
+.chip{padding:6px 12px;border:1px solid var(--border);border-radius:18px;font:12px var(--mono);
+  cursor:pointer;color:var(--muted);transition:all .16s;position:relative}
+.chip:hover{border-color:var(--brand);transform:translateY(-1px)}
+.chip.sel{border-color:var(--brand);color:var(--brand);background:rgba(43,229,138,.09);
+  box-shadow:0 0 14px rgba(43,229,138,.14)}
+.chip.auto{border-style:dashed;color:var(--brand2)}
+.chip.auto.sel{border-style:solid}
+.count{font:11px var(--mono);color:var(--dim);margin:12px 0 10px}
+.count i{font-style:normal;color:var(--brand)}
+
+button{font:inherit;cursor:pointer}
+.run{width:100%;padding:13px;border:0;border-radius:11px;font:600 15px var(--body);
+  color:#06130C;background:linear-gradient(92deg,var(--brand),var(--brand2));
+  transition:transform .16s,box-shadow .16s;position:relative;overflow:hidden}
+.run::after{content:'';position:absolute;inset:0;transform:translateX(-130%);
+  background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.4) 50%,transparent 65%);
+  animation:shine 4s ease-in-out infinite}
+@keyframes shine{0%,55%{transform:translateX(-130%)}90%,100%{transform:translateX(130%)}}
+.run:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 26px rgba(43,229,138,.35)}
+.run:disabled{opacity:.32;cursor:default}
+.run .arr{display:inline-block;transition:transform .2s;margin-left:5px}
+.run:hover .arr{transform:translateX(4px)}
+.btn2{padding:9px 15px;border-radius:9px;border:1px solid var(--border);background:var(--raised);
+  color:var(--text);font-size:13px;transition:all .16s}
+.btn2:hover{border-color:var(--brand);transform:translateY(-1px)}
+.btn2.accent{border-color:rgba(43,229,138,.5);color:var(--brand)}
+details{margin-top:14px;border-top:1px solid var(--border);padding-top:12px}
+summary{color:var(--muted);font-size:13px;cursor:pointer;transition:color .16s;list-style:none;
+  display:flex;align-items:center;gap:8px}
+summary::before{content:'+';font:600 14px var(--mono);color:var(--brand);transition:transform .2s}
+details[open] summary::before{transform:rotate(45deg)}
+summary:hover{color:var(--text)}
+textarea{width:100%;background:var(--raised);color:var(--text);border:1px solid var(--border);
+  border-radius:9px;font:12px var(--mono);padding:11px;margin-top:10px;height:120px;
+  transition:border-color .16s;resize:vertical}
+textarea:focus{outline:0;border-color:rgba(43,229,138,.5)}
+
+/* report */
+#report{min-height:420px}
+.empty{color:var(--muted);padding:70px 20px;text-align:center}
+.empty .art{font:600 44px var(--disp);letter-spacing:-.03em;margin-bottom:14px;
+  background:linear-gradient(92deg,var(--brand),var(--brand2));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;opacity:.9}
+.empty p{max-width:380px;margin:0 auto;font-size:14px}
+.runningbox{padding:60px 20px;text-align:center;color:var(--muted)}
+.runbar{width:280px;height:4px;border-radius:2px;background:var(--raised);margin:22px auto 14px;overflow:hidden}
+.runbar i{display:block;height:100%;width:40%;border-radius:2px;
+  background:linear-gradient(90deg,var(--brand),var(--brand2));animation:slide 1.3s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+.progress-steps{font:12px var(--mono);color:var(--dim)}
+.elapsed{font:600 13px var(--mono);color:var(--brand);margin-top:8px}
+
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:10px 11px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+th{color:var(--dim);font:600 10px var(--mono);text-transform:uppercase;letter-spacing:.1em}
+tr:last-child td{border-bottom:0}
+.cell{border-radius:10px;padding:9px 11px;cursor:pointer;transition:transform .15s,box-shadow .15s;
+  animation:pop .45s cubic-bezier(.2,.9,.3,1.2) both}
+.cell:hover{transform:scale(1.05);box-shadow:0 6px 18px rgba(0,0,0,.4)}
+@keyframes pop{from{opacity:0;transform:scale(.6)}to{opacity:1;transform:scale(1)}}
+.cell.pass{background:rgba(43,229,138,.1);border:1px solid rgba(43,229,138,.5)}
+.cell.fail{background:rgba(255,93,93,.09);border:1px solid rgba(255,93,93,.5)}
+.cell.err{background:rgba(255,178,36,.09);border:1px solid rgba(255,178,36,.5)}
+.cell b{font:600 12.5px var(--body)}
+.cell small{display:block;color:var(--muted);font:10.5px var(--mono);margin-top:3px}
+.reco{margin:16px 0 18px;padding:17px 20px;border-radius:13px;border:1px solid rgba(43,229,138,.5);
+  background:linear-gradient(90deg,rgba(43,229,138,.09),rgba(43,229,138,.03));
+  animation:pop .45s both;display:flex;gap:14px;align-items:center}
+.reco .cup{font-size:26px}
+.reco b{color:var(--brand);font-family:var(--mono)}
+.reco .why{color:var(--muted);font:12.5px var(--mono)}
+.catlabel{font:600 10.5px var(--mono);color:var(--link)}
+.permodel{margin-top:13px;color:var(--muted);font:12px var(--mono);display:flex;gap:18px;flex-wrap:wrap}
+.permodel span b{color:var(--text)}
+
+.fixpanel{margin-top:20px;padding:20px;border-radius:14px;border:1px solid var(--border);
+  background:var(--raised);animation:rise .4s both}
+.fixpanel>b{font:600 15px var(--disp)}
+.fixpanel pre{white-space:pre-wrap;font:12px var(--mono);margin:12px 0;max-height:170px;
+  overflow:auto;color:var(--muted);border-left:2px solid var(--brand);padding-left:12px}
+.beforeafter{display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center;
+  margin-top:16px;text-align:center;max-width:430px}
+.ba-card{border:1px solid var(--border);border-radius:12px;padding:18px;transition:transform .2s}
+.ba-card:hover{transform:translateY(-2px)}
+.ba-card.good{border-color:rgba(43,229,138,.55);background:rgba(43,229,138,.07)}
+.ba-card b{font:700 30px var(--disp);display:block;letter-spacing:-.02em}
+.ba-card span{color:var(--muted);font:11px var(--mono)}
+.ba-arrow{font-size:24px;color:var(--brand);animation:nudge 1.6s ease-in-out infinite}
+@keyframes nudge{0%,100%{transform:translateX(0)}50%{transform:translateX(6px)}}
+.toolrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+
+.badgezone{margin-top:18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;
+  padding:14px 16px;border:1px dashed var(--border2);border-radius:12px}
+.badgezone img{height:26px}
+.badgezone code{font:11px var(--mono);color:var(--muted);cursor:pointer;transition:color .16s}
+.badgezone code:hover{color:var(--brand)}
+
+.hist-item{display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);
+  font:12px var(--mono);color:var(--muted)}
+.hist-item:last-child{border-bottom:0}
+.hist-bar{height:7px;border-radius:4px;background:linear-gradient(90deg,var(--brand),var(--brand2));
+  min-width:5px;transition:width .5s ease}
+.hist-item .delta{margin-left:auto;font-weight:600}
+.delta.up{color:var(--brand)}.delta.down{color:var(--fail)}
+
+dialog{background:var(--surface);color:var(--text);border:1px solid var(--border2);
+  border-radius:16px;padding:26px;max-width:680px;box-shadow:0 40px 120px rgba(0,0,0,.7)}
+dialog::backdrop{background:rgba(4,6,9,.7);backdrop-filter:blur(4px)}
+dialog pre{white-space:pre-wrap;font:12px var(--mono);background:var(--raised);padding:14px;
+  border-radius:10px;margin-top:12px;max-height:340px;overflow:auto}
+
+#toast{position:fixed;bottom:26px;left:50%;transform:translate(-50%,80px);z-index:99;
+  background:var(--raised);border:1px solid rgba(43,229,138,.5);color:var(--text);
+  font:500 13px var(--body);border-radius:11px;padding:11px 20px;transition:transform .3s cubic-bezier(.2,.9,.3,1.2)}
+#toast.show{transform:translate(-50%,0)}
+@media(max-width:940px){.grid{grid-template-columns:1fr}.navr .judgechip{display:none}}
+</style>
+</head>
+<body>
+<div class="orb a"></div><div class="orb b"></div>
+
+<nav><div class="inner">
+  <a class="logo" href="/"><span class="dot"></span>AgentBench</a>
+  <span class="crumb">/ console</span>
+  <div class="navr">
+    <span class="judgechip" id="judgechip">judge: <i>...</i></span>
+    <span class="mockbadge" id="mockbadge">MOCK MODE, set MESH_API_KEY</span>
+    <a class="backlink" href="/">&#8592; Landing</a>
+  </div>
+</div></nav>
+
+<div class="wrap"><div class="grid">
+  <div>
+    <div class="panel">
+      <h2><span class="num">1</span>Test suite</h2>
+      <div id="suites"></div>
+      <details><summary>Paste custom suite (YAML)</summary>
+        <textarea id="yaml" placeholder="name: My Bot&#10;system_prompt: ...&#10;tests:&#10;  - input: ...&#10;    category: requires_clarification"></textarea>
+        <button class="btn2" style="margin-top:9px" onclick="uploadSuite()">Add suite</button>
+      </details>
+      <details><summary>Red team my system prompt</summary>
+        <textarea id="rtprompt" style="height:88px" placeholder="Paste the system prompt to attack..."></textarea>
+        <button class="btn2 accent" style="margin-top:9px" id="rtbtn" onclick="redteam()">Generate attack suite</button>
+      </details>
+    </div>
+    <div class="panel" style="margin-top:20px">
+      <h2><span class="num">2</span>Models via MeshAPI</h2>
+      <div id="models"></div>
+      <div class="count" id="selcount">Pick up to 4 models. <i>auto</i> is MeshAPI smart routing.</div>
+      <button class="run" id="runbtn" onclick="startRun()" disabled>Run benchmark<span class="arr">&#8594;</span></button>
+    </div>
+    <div class="panel" id="histpanel" style="display:none;margin-top:20px">
+      <h2><span class="num">&#8635;</span>Run history</h2>
+      <div id="hist"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="report">
+    <h2><span class="num">3</span>Report</h2>
+    <div class="empty">
+      <div class="art">PASS / FAIL</div>
+      <p>Pick a suite and up to four models, then run. Every cell is judged behavior, real latency, and live MeshAPI pricing.</p>
+    </div>
+  </div>
+</div></div>
+
+<dialog id="dlg"><div id="dlgbody"></div>
+  <button class="btn2" onclick="dlg.close()" style="margin-top:16px">Close</button></dialog>
+<div id="toast">Copied badge markdown</div>
+
+<script>
+let suites=[],selSuite=null,selModels=new Set(),lastRun=null,fixedRun=null,timerIv=null;
+const $=id=>document.getElementById(id);
+async function api(path,opts){const r=await fetch('/api'+path,opts);
+  if(!r.ok){let d;try{d=(await r.json()).detail}catch(e){d=r.status}throw new Error(d)}return r.json()}
+const post=(p,b)=>api(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+
+async function init(){
+  const meta=await api('/meta');
+  if(meta.mock)$('mockbadge').style.display='inline-block';
+  $('judgechip').innerHTML='judge: <i>'+meta.judge_model.split('/').pop()+'</i>';
+  // group model chips by provider
+  const groups={};
+  meta.models.forEach(m=>{
+    const p=m==='auto'?'meshapi':m.split('/')[0];
+    (groups[p]=groups[p]||[]).push(m)});
+  $('models').innerHTML=Object.entries(groups).map(([p,ms])=>
+    `<div class="prov">${p}</div><div class="models">`+
+    ms.map(m=>`<div class="chip ${m==='auto'?'auto':''}" data-m="${m}"
+      onclick="toggleModel('${m}',this)">${m==='auto'?'&#10024; auto':m.split('/').pop()}</div>`).join('')+
+    '</div>').join('');
+  await loadSuites(); renderHist();
+}
+async function loadSuites(sel){
+  suites=await api('/suites');
+  $('suites').innerHTML=suites.map(s=>{
+    const rt=s.suite_id.startsWith('redteam');
+    return `<div class="suite ${s.suite_id===sel?'sel':''}" data-id="${s.suite_id}" onclick="selectSuite('${s.suite_id}',this)">
+      ${rt?'<span class="tag">RED TEAM</span>':''}<b>${esc(s.name||s.suite_id)}</b>
+      <span>${s.num_tests} tests</span></div>`}).join('');
+  if(sel){selSuite=sel;updateBtn()}
+}
+function selectSuite(id,el){selSuite=id;
+  document.querySelectorAll('.suite').forEach(e=>e.classList.remove('sel'));
+  el.classList.add('sel');updateBtn()}
+function toggleModel(m,el){
+  if(selModels.has(m)){selModels.delete(m);el.classList.remove('sel')}
+  else if(selModels.size<4){selModels.add(m);el.classList.add('sel')}
+  $('selcount').innerHTML=selModels.size?`<i>${selModels.size}</i> of 4 selected`:
+    'Pick up to 4 models. <i>auto</i> is MeshAPI smart routing.';
+  updateBtn()}
+function updateBtn(){$('runbtn').disabled=!(selSuite&&selModels.size>=1)}
+
+async function uploadSuite(){
+  try{const r=await post('/suites',{yaml_text:$('yaml').value});await loadSuites(r.suite_id);toast('Suite added')}
+  catch(e){alert(e.message)}}
+
+async function redteam(){
+  const p=$('rtprompt').value.trim(); if(!p)return alert('Paste a system prompt first.');
+  $('rtbtn').textContent='Generating attacks...';$('rtbtn').disabled=true;
+  try{const s=await post('/redteam',{system_prompt:p,name:'Red Team: '+p.slice(0,26)+'...'});
+    await loadSuites(s.suite_id);toast('Attack suite ready: '+s.tests.length+' tests')}
+  catch(e){alert(e.message)}
+  $('rtbtn').textContent='Generate attack suite';$('rtbtn').disabled=false}
+
+const PROG=['Dispatching tests through MeshAPI...','Models responding...',
+  'Judge scoring each behavior...','Pricing from the live catalog...','Assembling the report...'];
+function showProgress(){
+  $('report').innerHTML=`<h2><span class="num">3</span>Report</h2>
+    <div class="runningbox">Benchmark in flight
+      <div class="runbar"><i></i></div>
+      <div class="progress-steps" id="prog">${PROG[0]}</div>
+      <div class="elapsed" id="elapsed">0.0s</div></div>`;
+  const t0=performance.now();let i=0;
+  timerIv=setInterval(()=>{$('elapsed').textContent=((performance.now()-t0)/1000).toFixed(1)+'s'},100);
+  return setInterval(()=>{i=Math.min(i+1,PROG.length-1);$('prog').textContent=PROG[i]},2400)}
+function stopProgress(t){clearInterval(t);clearInterval(timerIv)}
+
+async function startRun(){
+  $('runbtn').disabled=true;fixedRun=null;
+  const models=[...selModels];
+  const suite=suites.find(s=>s.suite_id===selSuite);
+  // live skeleton grid: cells flip from pending to pass/fail as SSE events arrive
+  let livedone=0,liveTotal=0;
+  const es=new EventSource(`/api/runs/stream?suite_id=${encodeURIComponent(selSuite)}&models=${encodeURIComponent(models.join(','))}`);
+  let gotAny=false;
+  const t=showProgress();
+  es.addEventListener('start',e=>{
+    gotAny=true;stopProgress(t);
+    liveTotal=JSON.parse(e.data).total;
+    renderLiveGrid(suite,models)});
+  es.addEventListener('cell',e=>{
+    const r=JSON.parse(e.data);livedone++;
+    fillLiveCell(r,models);
+    const el=$('livestatus');
+    if(el)el.textContent=`${livedone}/${liveTotal} cells judged`});
+  es.addEventListener('done',e=>{
+    es.close();lastRun=JSON.parse(e.data);
+    saveHist(lastRun);render(lastRun);renderHist();$('runbtn').disabled=false});
+  es.onerror=async()=>{
+    es.close();
+    if(gotAny&&lastRun)return;
+    // fallback: sync run (serverless environments that buffer SSE)
+    try{lastRun=await post('/runs',{suite_id:selSuite,models,sync:true});
+      saveHist(lastRun);render(lastRun);renderHist()}
+    catch(err){$('report').innerHTML=`<h2><span class="num">3</span>Report</h2>
+      <div class="empty"><p>Run failed: ${esc(err.message)}</p></div>`}
+    stopProgress(t);$('runbtn').disabled=false};
+}
+
+let liveResults=[];
+function renderLiveGrid(suite,models){
+  liveResults=[];
+  let html=`<h2><span class="num">3</span>Report &middot; ${esc(suite?suite.name:'')}
+    <span style="margin-left:auto;font:11px var(--mono);color:var(--brand)" id="livestatus">running...</span></h2>`;
+  html+='<div style="overflow-x:auto"><table><tr><th style="min-width:210px">Test case</th>'+
+    models.map(m=>`<th>${m==='auto'?'&#10024; auto':m.split('/').pop()}</th>`).join('')+'</tr>';
+  html+=`<tbody id="livebody"></tbody></table></div>
+    <div class="permodel" id="livefoot"></div>`;
+  $('report').innerHTML=html;
+}
+function fillLiveCell(r,models){
+  liveResults.push(r);
+  let row=document.querySelector(`tr[data-in="${cssq(r.input)}"]`);
+  if(!row){
+    row=document.createElement('tr');row.setAttribute('data-in',cssq(r.input));
+    row.innerHTML=`<td><span class="catlabel">${r.category}</span><br>${esc(r.input.slice(0,85))}${r.input.length>85?'...':''}</td>`+
+      models.map(m=>`<td data-m="${m}"><div class="cell" style="opacity:.25;border:1px dashed var(--border2)">
+        <b style="color:var(--dim)">&#8943;</b></div></td>`).join('');
+    $('livebody').appendChild(row)}
+  const cls=r.status==='error'?'err':(r.pass?'pass':'fail');
+  const label=r.status==='error'?'&#9888; error':(r.pass?'&#10003; pass':'&#10007; fail');
+  row.querySelector(`td[data-m="${r.model}"]`).innerHTML=
+    `<div class="cell ${cls}"><b>${label}</b><small>${r.latency_ms}ms &middot; $${r.cost_usd.toFixed(5)}</small></div>`;
+}
+function cssq(s){return btoa(unescape(encodeURIComponent(s))).slice(0,24).replace(/[+/=]/g,'_')}
+
+async function fixRerun(){
+  const b=$('fixbtn');b.textContent='Re-running with fixed prompt...';b.disabled=true;
+  try{fixedRun=await post('/fix-rerun',{suite_id:selSuite,models:lastRun.models,
+      fixed_prompt:lastRun.suggested_prompt});
+    saveHist(fixedRun,'(fixed)');render(lastRun);renderHist();toast('Fix benchmarked')}
+  catch(e){alert(e.message);b.textContent='Apply fix and re-run';b.disabled=false}}
+
+function totalPass(run){return run.results.filter(r=>r.pass).length}
+
+function render(run){
+  const models=run.models;
+  const inputs=[...new Map(run.results.map(r=>[r.input,r])).values()];
+  const byKey={};run.results.forEach((r,i)=>byKey[r.input+'|'+r.model]={...r,idx:i});
+  const s=run.summary;
+  let html=`<h2><span class="num">3</span>Report &middot; ${esc(run.suite_name||'')}</h2>`;
+  html+=`<div class="reco"><span class="cup">&#127942;</span><div>
+    Ship <b>${s.recommended}</b><br><span class="why">${esc(s.reason)}</span></div></div>`;
+  html+='<div style="overflow-x:auto"><table><tr><th style="min-width:210px">Test case</th>'+
+    models.map(m=>`<th>${m==='auto'?'&#10024; auto':m.split('/').pop()}</th>`).join('')+'</tr>';
+  let ci=0;
+  for(const row of inputs){
+    html+=`<tr><td><span class="catlabel">${row.category}</span><br>${esc(row.input.slice(0,85))}${row.input.length>85?'...':''}</td>`;
+    for(const m of models){
+      const r=byKey[row.input+'|'+m];
+      const cls=r.status==='error'?'err':(r.pass?'pass':'fail');
+      const label=r.status==='error'?'&#9888; error':(r.pass?'&#10003; pass':'&#10007; fail');
+      html+=`<td><div class="cell ${cls}" style="animation-delay:${ci*45}ms" onclick="showDetail(${r.idx})">
+        <b>${label}</b><small>${r.latency_ms}ms &middot; $${r.cost_usd.toFixed(5)}</small></div></td>`;ci++}
+    html+='</tr>'}
+  html+='</table></div>';
+  html+='<div class="permodel">'+s.per_model.map(p=>
+    `<span><b>${p.model==='auto'?'auto':p.model.split('/').pop()}</b> ${p.passed}/${p.total} &middot; $${p.total_cost_usd.toFixed(4)} &middot; ${p.avg_latency_ms}ms</span>`).join('')+'</div>';
+
+  const best=s.per_model.find(p=>p.model===s.recommended);
+  const burl=`/api/badge.svg?label=${encodeURIComponent(run.suite_name||'suite')}&passed=${best.passed}&total=${best.total}`;
+  html+=`<div class="badgezone"><img src="${burl}" alt="badge">
+    <code onclick="copyBadge('${burl}')" title="click to copy">![AgentBench](${location.origin}${burl}) &#128203;</code></div>`;
+
+  if(fixedRun){
+    const b0=totalPass(run),b1=totalPass(fixedRun),n=run.results.length;
+    html+=`<div class="fixpanel"><b>&#128295; Fix applied and re-benchmarked</b>
+      <div class="beforeafter">
+        <div class="ba-card"><b>${b0}/${n}</b><span>original prompt</span></div>
+        <div class="ba-arrow">&#8594;</div>
+        <div class="ba-card ${b1>=b0?'good':''}"><b>${b1}/${n}</b><span>fixed prompt</span></div>
+      </div>
+      <details style="border:0;padding:0;margin-top:14px"><summary>View fixed prompt</summary><pre>${esc(lastRun.suggested_prompt)}</pre></details>
+      <button class="btn2" style="margin-top:12px" onclick="viewFixed()">Open fixed run report</button></div>`;
+  } else if(run.suggested_prompt){
+    html+=`<div class="fixpanel"><b>&#128161; Suggested prompt fix</b>
+      <pre>${esc(run.suggested_prompt)}</pre>
+      <div class="toolrow">
+        <button class="btn2 accent" id="fixbtn" onclick="fixRerun()">Apply fix and re-run</button>
+      </div></div>`;
+  }
+  html+=`<div class="toolrow">
+    <button class="btn2 accent" onclick="shareReport()">Share report link</button>
+    <button class="btn2" onclick="exportReport()">Export JSON</button></div>`;
+  $('report').innerHTML=html;
+}
+function viewFixed(){const tmp=lastRun;lastRun=fixedRun;const f=fixedRun;fixedRun=null;render(f);lastRun=tmp}
+
+function showDetail(i){const r=lastRun.results[i];
+  $('dlgbody').innerHTML=`<b style="font-family:var(--mono)">${r.model}</b> &middot; <span class="catlabel">${r.category}</span>
+    <pre>INPUT:\n${esc(r.input)}\n\nRESPONSE:\n${esc(r.response)}\n\nJUDGE: ${r.pass?'PASS':'FAIL'} (confidence ${r.confidence??'n/a'})\n${esc(r.reason||'')}</pre>`;
+  dlg.showModal()}
+function exportReport(){const blob=new Blob([JSON.stringify(fixedRun?{original:lastRun,fixed:fixedRun}:lastRun,null,2)],
+  {type:'application/json'});const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download='agentbench-'+lastRun.run_id+'.json';a.click()}
+function shareReport(){const u=location.origin+'/r/'+lastRun.run_id;
+  navigator.clipboard.writeText(u);toast('Report link copied: '+u)}
+function copyBadge(u){navigator.clipboard.writeText(`![AgentBench](${location.origin}${u})`);toast('Copied badge markdown')}
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2200)}
+
+function saveHist(run,tag){
+  const h=JSON.parse(localStorage.getItem('ab_hist')||'[]');
+  h.unshift({ts:Date.now(),suite:(run.suite_name||'')+(tag?' '+tag:''),
+    passed:totalPass(run),total:run.results.length,reco:run.summary.recommended});
+  localStorage.setItem('ab_hist',JSON.stringify(h.slice(0,25)))}
+function renderHist(){
+  const h=JSON.parse(localStorage.getItem('ab_hist')||'[]');
+  if(!h.length)return;
+  $('histpanel').style.display='block';
+  $('hist').innerHTML=h.slice(0,10).map((x,i)=>{
+    const prev=h[i+1],rate=x.passed/x.total;
+    let d='';
+    if(prev&&prev.suite.replace(' (fixed)','')===x.suite.replace(' (fixed)','')){
+      const pr=prev.passed/prev.total;
+      d=rate>pr?`<span class="delta up">&#9650; +${x.passed-prev.passed}</span>`
+        :rate<pr?`<span class="delta down">&#9660; ${x.passed-prev.passed}</span>`
+        :'<span class="delta">=</span>'}
+    return `<div class="hist-item"><div class="hist-bar" style="width:${rate*64}px;opacity:${Math.max(rate,.25)}"></div>
+      ${x.passed}/${x.total} &middot; ${esc(x.suite.slice(0,22))} ${d}</div>`}).join('')}
+
+function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+init();
+</script>
+</body>
+</html>

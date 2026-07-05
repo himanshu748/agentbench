@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentBench. The test suite your AI ships with.</title>
+<meta name="description" content="Behavior tests for prompts and agents, run across 500+ models on MeshAPI. Pass rates, real cost, latency, and a fix for what fails.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07090D; --surface:#0C1016; --raised:#121826; --border:#1C2432; --border2:#2A3547;
+  --text:#EDF1F7; --muted:#8C97A9; --dim:#5C6878;
+  --brand:#2BE58A; --brand2:#7CF5C8; --fail:#FF5D5D; --warn:#FFB224; --link:#6FA8FF;
+  --disp:'Space Grotesk',system-ui,sans-serif; --body:'Inter',system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth}
+#progress{position:fixed;top:0;left:0;height:2px;z-index:100;width:0;
+  background:linear-gradient(90deg,var(--brand),var(--brand2));
+  box-shadow:0 0 10px rgba(43,229,138,.6)}
+body{background:var(--bg);color:var(--text);font:16px/1.65 var(--body);overflow-x:hidden;
+  background-image:radial-gradient(rgba(140,151,169,.07) 1px,transparent 1px);
+  background-size:32px 32px}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1140px;margin:0 auto;padding:0 28px}
+::selection{background:rgba(43,229,138,.3)}
+
+/* ambient orbs */
+.orb{position:fixed;border-radius:50%;filter:blur(120px);pointer-events:none;z-index:0}
+.orb.a{width:520px;height:520px;background:rgba(43,229,138,.07);top:-160px;left:-120px}
+.orb.b{width:460px;height:460px;background:rgba(111,168,255,.05);top:40%;right:-180px}
+
+/* nav */
+nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(16px);
+  background:rgba(7,9,13,.8);border-bottom:1px solid var(--border)}
+nav .wrap{display:flex;align-items:center;height:66px;gap:30px}
+.logo{font:700 19px var(--disp);letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+.logo .dot{width:10px;height:10px;border-radius:3px;background:var(--brand);
+  box-shadow:0 0 14px var(--brand);animation:blink 2.4s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+nav .links{margin-left:auto;display:flex;gap:26px;font-size:14px;color:var(--muted)}
+nav .links a{transition:color .18s}
+nav .links a:hover{color:var(--text)}
+.cta{background:var(--brand);color:#06130C;font:600 14px var(--body);white-space:nowrap;
+  padding:10px 19px;border-radius:10px;transition:transform .18s,box-shadow .18s;
+  position:relative;overflow:hidden;display:inline-block}
+.cta:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(43,229,138,.4)}
+.cta::after{content:'';position:absolute;inset:0;transform:translateX(-130%);
+  background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.45) 50%,transparent 65%);
+  animation:shine 4s ease-in-out infinite}
+@keyframes shine{0%,55%{transform:translateX(-130%)}90%,100%{transform:translateX(130%)}}
+
+/* hero */
+.hero{padding:110px 0 84px;position:relative;z-index:1}
+.hero .wrap{display:grid;grid-template-columns:1.04fr .96fr;gap:64px;align-items:center}
+.kicker{font:600 11.5px var(--mono);color:var(--brand);letter-spacing:.16em;text-transform:uppercase;
+  display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(43,229,138,.28);
+  background:rgba(43,229,138,.05);border-radius:20px;padding:6px 15px;margin-bottom:26px}
+.kicker::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--brand);
+  animation:blink 1.6s infinite}
+h1{font:700 clamp(40px,5.2vw,62px)/1.04 var(--disp);letter-spacing:-.035em}
+h1 .w{display:inline-block;opacity:0;transform:translateY(26px) rotate(2deg);
+  animation:wordin .7s cubic-bezier(.2,.8,.2,1) forwards}
+@keyframes wordin{to{opacity:1;transform:none}}
+h1 em{font-style:normal;background:linear-gradient(92deg,var(--brand) 20%,var(--brand2));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sub{color:var(--muted);font-size:18.5px;margin:24px 0 36px;max-width:540px;line-height:1.7}
+.sub b{color:var(--text);font-weight:600}
+.hero-ctas{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.cta.big{font-size:16px;padding:14px 28px;border-radius:12px}
+.cta .arr{display:inline-block;transition:transform .2s;margin-left:6px}
+.cta:hover .arr{transform:translateX(4px)}
+.ghost{font:500 15px var(--body);color:var(--muted);padding:14px 22px;border:1px solid var(--border2);
+  border-radius:12px;transition:all .18s;background:rgba(18,24,38,.5)}
+.ghost:hover{border-color:var(--brand);color:var(--text)}
+.providers{margin-top:40px;display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.providers span{font:500 12px var(--mono);color:var(--muted);border:1px solid var(--border);
+  border-radius:8px;padding:5px 11px;background:rgba(12,16,22,.7);opacity:0;
+  animation:chipin .5s ease forwards;transition:all .18s}
+.providers span:hover{border-color:var(--brand);color:var(--text);transform:translateY(-2px)}
+@keyframes chipin{to{opacity:1}}
+.providers .lbl{border:0;background:none;color:var(--dim);padding-left:0;font-size:11px;
+  letter-spacing:.08em;text-transform:uppercase}
+
+/* terminal viz */
+.term{background:linear-gradient(180deg,#0E141D,#0A0E15);border:1px solid var(--border2);
+  border-radius:18px;padding:0;box-shadow:0 40px 100px rgba(0,0,0,.6),0 0 0 1px rgba(43,229,138,.05);
+  overflow:hidden;position:relative;transition:transform .15s ease-out;will-change:transform}
+.cursor{display:inline-block;width:7px;height:13px;background:var(--brand);vertical-align:-2px;
+  margin-left:3px;animation:blink 1s steps(1) infinite}
+.term::before{content:'';position:absolute;inset:0 0 auto;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(43,229,138,.5),transparent)}
+.term .bar{display:flex;gap:7px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border)}
+.term .bar i{width:11px;height:11px;border-radius:50%;display:block}
+.term .bar i:nth-child(1){background:#FF5D5D66}.term .bar i:nth-child(2){background:#FFB22466}
+.term .bar i:nth-child(3){background:#2BE58A66}
+.term .bar .t{font:600 12px var(--mono);color:var(--muted);margin-left:10px}
+.term .bar .t .c{color:var(--brand)}
+.term .inner{padding:20px}
+.gv-table{display:grid;grid-template-columns:1.35fr repeat(3,1fr);gap:8px;font:11px var(--mono)}
+.gv-h{color:var(--dim);padding:4px;font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+.gv-name{color:var(--muted);padding:9px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gv-cell{border-radius:8px;padding:8px 0;text-align:center;font-weight:600;opacity:0;
+  animation:pop .5s cubic-bezier(.2,.9,.3,1.25) forwards}
+.gv-cell.p{background:rgba(43,229,138,.12);border:1px solid rgba(43,229,138,.5);color:var(--brand)}
+.gv-cell.f{background:rgba(255,93,93,.1);border:1px solid rgba(255,93,93,.45);color:var(--fail)}
+@keyframes pop{from{opacity:0;transform:scale(.55)}to{opacity:1;transform:scale(1)}}
+.gv-reco{margin-top:15px;border:1px solid rgba(43,229,138,.45);background:rgba(43,229,138,.08);
+  border-radius:10px;padding:11px 15px;font:600 11.5px var(--mono);color:var(--brand);
+  opacity:0;animation:pop .5s .1s forwards;display:flex;gap:8px;align-items:center}
+
+/* stats */
+.stats{border-block:1px solid var(--border);background:rgba(12,16,22,.6);position:relative;z-index:1}
+.stats .wrap{display:grid;grid-template-columns:repeat(4,1fr);padding:40px 28px}
+.stat{text-align:center;border-left:1px solid var(--border);padding:0 10px}
+.stat:first-child{border-left:0}
+.stat b{font:700 38px var(--disp);letter-spacing:-.02em;display:block;line-height:1.15}
+.stat span{color:var(--muted);font-size:13px}
+.stat b i{font-style:normal;color:var(--brand)}
+
+/* sections */
+section{padding:96px 0;position:relative;z-index:1}
+.sec-kicker{font:600 11.5px var(--mono);color:var(--brand);letter-spacing:.16em;text-transform:uppercase}
+h2{font:700 clamp(30px,3.6vw,44px)/1.12 var(--disp);letter-spacing:-.025em;margin:12px 0 16px}
+.sec-sub{color:var(--muted);max-width:600px;font-size:17px}
+.center{text-align:center}.center .sec-sub{margin-inline:auto}
+
+/* steps */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:48px}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;
+  transition:transform .2s,border-color .2s,box-shadow .2s}
+.step:hover{transform:translateY(-4px);border-color:rgba(43,229,138,.45);
+  box-shadow:0 16px 40px rgba(0,0,0,.35)}
+.step .n{font:700 13px var(--mono);color:#06130C;background:var(--brand);width:28px;height:28px;
+  border-radius:9px;display:grid;place-items:center;margin-bottom:18px}
+.step h3{font:600 18.5px var(--disp);margin-bottom:9px}
+.step p{color:var(--muted);font-size:14.5px}
+.step code{font:11.5px var(--mono);color:var(--brand2);background:var(--raised);
+  padding:2px 7px;border-radius:5px;border:1px solid var(--border)}
+
+/* use cases */
+.cases{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:46px}
+.case{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;
+  transition:all .2s;display:block}
+.case:hover{transform:translateY(-3px);border-color:rgba(43,229,138,.5);
+  box-shadow:0 14px 36px rgba(0,0,0,.35),0 0 0 1px rgba(43,229,138,.12) inset}
+.case .go .arr{display:inline-block;transition:transform .2s}
+.case:hover .go .arr{transform:translateX(5px)}
+.case:hover .em{transform:scale(1.15) rotate(-4deg)}
+.case .em{transition:transform .25s cubic-bezier(.3,1.4,.5,1)}
+.case .em{font-size:24px;margin-bottom:10px;display:block}
+.case h3{font:600 16.5px var(--disp);margin-bottom:5px}
+.case p{color:var(--muted);font-size:13.5px;margin-bottom:12px}
+.case .go{font:600 12px var(--mono);color:var(--brand)}
+
+/* features */
+.feats{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:48px}
+.feat{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:30px;
+  position:relative;transition:all .2s}
+.feat:hover{transform:translateY(-4px);border-color:rgba(43,229,138,.45);
+  box-shadow:0 16px 40px rgba(0,0,0,.35)}
+.feat .icon{width:44px;height:44px;border-radius:12px;background:rgba(43,229,138,.1);
+  border:1px solid rgba(43,229,138,.3);display:grid;place-items:center;font-size:20px;
+  margin-bottom:16px;transition:transform .25s cubic-bezier(.3,1.4,.5,1),box-shadow .25s}
+.feat:hover .icon{transform:scale(1.1) rotate(-5deg);box-shadow:0 0 20px rgba(43,229,138,.25)}
+.feat h3{font:600 20px var(--disp);margin-bottom:9px}
+.feat p{color:var(--muted);font-size:14.5px}
+.feat .pill{position:absolute;top:26px;right:26px;font:600 10px var(--mono);letter-spacing:.12em;
+  color:var(--brand);border:1px solid rgba(43,229,138,.3);border-radius:12px;padding:4px 10px}
+
+/* mesh section */
+.mesh{background:linear-gradient(180deg,rgba(12,16,22,.9),transparent);border-block:1px solid var(--border)}
+.meshgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:44px}
+.mcap{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:20px 22px}
+.mcap b{display:flex;gap:9px;align-items:center;font:600 15px var(--disp);margin-bottom:6px}
+.mcap b::before{content:'';width:7px;height:7px;border-radius:2px;background:var(--brand);
+  flex:none;transition:transform .2s,box-shadow .2s}
+.mcap{transition:border-color .2s,transform .2s}
+.mcap:hover{border-color:rgba(43,229,138,.4);transform:translateY(-2px)}
+.mcap:hover b::before{transform:rotate(45deg) scale(1.25);box-shadow:0 0 10px var(--brand)}
+.mcap p{color:var(--muted);font-size:13.5px}
+.meshproof{margin-top:34px;text-align:center}
+.meshproof code{display:inline-block;font:12.5px var(--mono);color:var(--muted);
+  background:var(--raised);border:1px solid var(--border);border-radius:10px;padding:11px 18px}
+.meshproof code i{font-style:normal;color:var(--brand)}
+
+/* reveal */
+.rv{opacity:0;transform:translateY(24px);transition:opacity .65s ease,transform .65s ease}
+.rv.in{opacity:1;transform:none}
+.rv.d1{transition-delay:.07s}.rv.d2{transition-delay:.14s}.rv.d3{transition-delay:.21s}
+.rv.d4{transition-delay:.28s}.rv.d5{transition-delay:.35s}
+
+.final{text-align:center;padding:120px 0}
+.final .badgeimg{height:30px;margin-bottom:26px}
+footer{border-top:1px solid var(--border);padding:32px 0;color:var(--muted);font-size:13px;position:relative;z-index:1}
+footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+footer b{color:var(--brand);font-weight:600}
+
+@media(max-width:920px){
+  .hero .wrap{grid-template-columns:1fr}
+  .stats .wrap{grid-template-columns:repeat(2,1fr)}
+  .stat{border:0;padding:12px 6px}
+  .steps,.cases,.meshgrid{grid-template-columns:1fr}
+  .feats{grid-template-columns:1fr}
+  nav .links{display:none}
+}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div class="orb a"></div><div class="orb b"></div>
+
+<nav><div class="wrap">
+  <a class="logo" href="/"><span class="dot"></span>AgentBench</a>
+  <div class="links">
+    <a href="#how">How it works</a><a href="#cases">Use cases</a>
+    <a href="#features">Features</a><a href="#mesh">MeshAPI</a>
+  </div>
+  <a class="cta" href="/app" style="margin-left:22px">Open the console</a>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <div>
+    <div class="kicker">CI for AI behavior</div>
+    <h1 id="h1">Ship AI features with <em>proof</em>, not vibes.</h1>
+    <p class="sub">Your prompt is untested code. AgentBench runs it through <b>behavior tests</b> across the models on MeshAPI and returns pass rates, real cost per call, latency, and a <b>fix for whatever fails</b>. Before your users find it.</p>
+    <div class="hero-ctas">
+      <a class="cta big" href="/app">Run a benchmark<span class="arr">&#8594;</span></a>
+      <a class="ghost" href="#how">See how it works</a>
+    </div>
+    <div class="providers">
+      <span class="lbl">One key, every provider</span>
+      <span>OpenAI</span><span>Anthropic</span><span>Google</span>
+      <span>Meta</span><span>Mistral</span><span>DeepSeek</span>
+    </div>
+  </div>
+  <div class="term">
+    <div class="bar"><i></i><i></i><i></i>
+      <span class="t"><span class="c">$</span> <span id="typed"></span><span class="cursor"></span></span></div>
+    <div class="inner">
+      <div class="gv-table" id="gvtable"></div>
+      <div class="gv-reco" id="gvreco" style="display:none">&#127942; SHIP gpt-4o-mini &middot; 5/5 passed &middot; $0.0004 &middot; 479ms avg</div>
+    </div>
+  </div>
+</div></header>
+
+<div class="stats"><div class="wrap">
+  <div class="stat rv"><b><i data-count="1000">0</i>+</b><span>LLMs on MeshAPI<br>
+    <span style="font:11px var(--mono);color:var(--dim)" id="livecount"></span></span></div>
+  <div class="stat rv d1"><b>&frac12;<span style="font-size:22px">&cent;</span></b><span>for a full benchmark run</span></div>
+  <div class="stat rv d2"><b><i data-count="6">0</i></b><span>ready-made use case suites</span></div>
+  <div class="stat rv d3"><b><i data-count="5">0</i>s</b><span>from prompt to verdict, measured live</span></div>
+</div></div>
+
+<section id="how"><div class="wrap">
+  <div class="sec-kicker rv">How it works</div>
+  <h2 class="rv">Exact match is dead.<br>Judge behavior instead.</h2>
+  <p class="sec-sub rv">LLM output changes on every call, so string equality can never test it. AgentBench tags each test with a behavior category and a judge model scores every response against that category's rubric.</p>
+  <div class="steps">
+    <div class="step rv"><div class="n">1</div><h3>Define tests in YAML</h3>
+      <p>Each case is an input plus an expected behavior: <code>requires_clarification</code>, <code>injection_resistance</code>, <code>conciseness</code>, <code>tone_deescalation</code>, or <code>no_fabrication</code>. Five tests take five minutes. Or let the red team generator write them for you.</p></div>
+    <div class="step rv d1"><div class="n">2</div><h3>Run across models</h3>
+      <p>Every test hits every model you pick, concurrently, through MeshAPI's unified endpoint. Include <code>auto</code> to benchmark MeshAPI's smart routing against fixed models. Timeouts become error cells. Nothing crashes a run.</p></div>
+    <div class="step rv d2"><div class="n">3</div><h3>Read the verdict</h3>
+      <p>A pass/fail grid with latency and cost per cell, priced from MeshAPI's live catalog. One clear call: the cheapest model that passes everything is the one you ship.</p></div>
+  </div>
+</div></section>
+
+<section id="cases" style="padding-top:0"><div class="wrap">
+  <div class="sec-kicker rv">Use cases</div>
+  <h2 class="rv">Six suites, ready to run.</h2>
+  <p class="sec-sub rv">Every suite encodes the failure modes that actually burn teams in production. Load one, or use them as templates for your own bot.</p>
+  <div class="cases">
+    <a class="case rv" href="/app"><span class="em">&#127981;</span><h3>Customer Support Bot</h3>
+      <p>Refund traps, injection attacks, discount code bait, angry customers.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+    <a class="case rv d1" href="/app"><span class="em">&#128187;</span><h3>Coding Assistant</h3>
+      <p>Ambiguous bug reports, config leaks, fabricated benchmark numbers.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+    <a class="case rv d2" href="/app"><span class="em">&#128737;</span><h3>Content Moderator</h3>
+      <p>Fake admin overrides, invented rules, furious appeal messages.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+    <a class="case rv d3" href="/app"><span class="em">&#127973;</span><h3>Healthcare Triage</h3>
+      <p>Missing symptoms, dosage bait, distressed parents, invented statistics.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+    <a class="case rv d4" href="/app"><span class="em">&#128188;</span><h3>Sales Email Assistant</h3>
+      <p>Playbook leaks, fabricated ROI numbers, context-free draft requests.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+    <a class="case rv d5" href="/app"><span class="em">&#128101;</span><h3>HR Policy Bot</h3>
+      <p>Location-dependent answers, confidential guidance, invented stipends.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+  </div>
+</div></section>
+
+<section id="features" style="padding-top:0"><div class="wrap">
+  <div class="sec-kicker rv">Features</div>
+  <h2 class="rv">Four things no eyeball test gives you.</h2>
+  <div class="feats">
+    <div class="feat rv"><div class="pill">CLOSED LOOP</div><div class="icon">&#128295;</div>
+      <h3>Fix and re-run</h3>
+      <p>When tests fail, AgentBench drafts a corrected system prompt, re-runs the suite with it, and shows before and after pass counts side by side. Your prompt heals itself while you watch.</p></div>
+    <div class="feat rv d1"><div class="pill">SECURITY</div><div class="icon">&#127919;</div>
+      <h3>Red team generator</h3>
+      <p>Paste your system prompt and AgentBench writes the adversarial tests for you: injection attacks, fabrication bait, hostile users, missing-context traps. Then it runs them.</p></div>
+    <div class="feat rv d2"><div class="pill">CI/CD</div><div class="icon">&#128200;</div>
+      <h3>Regression timeline</h3>
+      <p>Every run lands in a history timeline. Change your prompt, run again, and see exactly which model and which behavior category regressed, with deltas between runs.</p></div>
+    <div class="feat rv d3"><div class="pill">SHAREABLE</div><div class="icon">&#127942;</div>
+      <h3>Quality gate badge</h3>
+      <p>Every run mints a CI-style badge with copy-paste README markdown. Green means every behavior test passed on the recommended model.</p></div>
+  </div>
+</div></section>
+
+<section class="mesh" id="mesh"><div class="wrap center">
+  <div class="sec-kicker rv">Built on MeshAPI</div>
+  <h2 class="rv">Every call routes through the gateway.</h2>
+  <p class="sec-sub rv">Test execution, judge scoring, red team generation, and prompt fixes: all of it is MeshAPI traffic. AgentBench leans on what the gateway actually provides.</p>
+  <div class="meshgrid" style="text-align:left">
+    <div class="mcap rv"><b>Unified endpoint</b><p>One OpenAI-compatible API for every provider. AgentBench has exactly one integration file: mesh_client.py.</p></div>
+    <div class="mcap rv d1"><b>Live pricing catalog</b><p>Cost per cell comes from MeshAPI's /models pricing feed at startup. Real numbers, not a hardcoded table.</p></div>
+    <div class="mcap rv d2"><b>Smart auto routing</b><p>MeshAPI can pick the model per request. AgentBench lets you benchmark auto against fixed models to see if it earns its keep.</p></div>
+    <div class="mcap rv d3"><b>Spend-capped keys</b><p>The demo runs on a Router Service Key with a spend cap, so a public deployment cannot burn the account.</p></div>
+    <div class="mcap rv d4"><b>Sub-100ms failover</b><p>If a provider goes down mid-run, MeshAPI reroutes. AgentBench marks anything that still fails as an error cell and keeps going.</p></div>
+    <div class="mcap rv d5"><b>Zero prompt storage</b><p>MeshAPI does not store prompts by default, so your test inputs and system prompts stay yours.</p></div>
+  </div>
+  <div class="meshproof rv">
+    <code>POST https://api.meshapi.ai/v1/chat/completions &nbsp;<i>Authorization: Bearer rsk_...</i></code>
+  </div>
+</div></section>
+
+<section class="final"><div class="wrap">
+  <img class="badgeimg rv" src="/api/badge.svg?label=demo&passed=5&total=5" alt="AgentBench quality badge">
+  <h2 class="rv">Your users are already testing it.<br>Beat them to it.</h2>
+  <p class="sec-sub rv" style="margin:0 auto 32px">No signup. Six preloaded suites. A full run costs about half a cent.</p>
+  <a class="cta big rv" href="/app">Run a benchmark now</a>
+</div></section>
+
+<footer><div class="wrap">
+  <span><b>AgentBench</b> &middot; built for the MeshAPI Hackathon, July 2026</span>
+  <span style="font-family:var(--mono)">test execution + judging + red team + fixes, all via MeshAPI</span>
+</div></footer>
+
+<script>
+// hero terminal: staggered pass/fail loop
+const rows=[["clarification","p","p","f"],["injection","p","p","p"],["conciseness","p","f","f"],
+            ["tone","p","p","p"],["fabrication","p","f","p"]];
+const models=["gpt-4o-mini","haiku-4.5","llama-70b"];
+function playGrid(){
+  const t=document.getElementById('gvtable');
+  t.innerHTML='<div class="gv-h">test</div>'+models.map(m=>`<div class="gv-h">${m}</div>`).join('');
+  document.getElementById('gvreco').style.display='none';
+  rows.forEach((r,ri)=>{
+    t.insertAdjacentHTML('beforeend',`<div class="gv-name">${r[0]}</div>`+
+      r.slice(1).map((c,ci)=>`<div class="gv-cell ${c}" style="animation-delay:${(ri*3+ci)*.13+.15}s">${c==='p'?'PASS':'FAIL'}</div>`).join(''));
+  });
+  setTimeout(()=>{document.getElementById('gvreco').style.display='flex'},rows.length*3*130+500);
+  setTimeout(playGrid,rows.length*3*130+5200);
+}
+playGrid();
+
+// live catalog count from the API (subline under the 1000+ marketing claim)
+fetch('/api/meta').then(r=>r.json()).then(m=>{
+  if(m.model_count)document.getElementById('livecount').textContent=
+    m.model_count+' in the live catalog ('+m.chat_count+' chat)';
+}).catch(()=>{});
+
+// scroll progress bar
+addEventListener('scroll',()=>{
+  const h=document.documentElement;
+  document.getElementById('progress').style.width=
+    (h.scrollTop/(h.scrollHeight-h.clientHeight)*100)+'%';
+},{passive:true});
+
+// hero: staggered word reveal (keeps the <em> highlight intact)
+(function(){
+  const h=document.getElementById('h1');
+  h.innerHTML=h.innerHTML.split(/(<em>.*?<\/em>)/g).map(part=>{
+    if(part.startsWith('<em>'))return `<span class="w" style="animation-delay:.34s">${part}</span>`;
+    return part.split(' ').map(w=>w&&`<span class="w">${w}</span>`).join(' ');
+  }).join('');
+  h.querySelectorAll('.w').forEach((w,i)=>{if(!w.style.animationDelay)w.style.animationDelay=(i*.07)+'s'});
+})();
+
+// terminal: type the command, then run the grid
+(function(){
+  const cmd='agentbench run customer-support',el=document.getElementById('typed');
+  let i=0;(function type(){if(i<=cmd.length){el.textContent=cmd.slice(0,i++);setTimeout(type,38)}})();
+})();
+
+// provider chips: staggered entrance
+document.querySelectorAll('.providers span:not(.lbl)').forEach((s,i)=>
+  s.style.animationDelay=(0.7+i*.09)+'s');
+
+// terminal: subtle 3D tilt following the mouse
+(function(){
+  const t=document.querySelector('.term');if(!t||matchMedia('(pointer:coarse)').matches)return;
+  t.addEventListener('mousemove',e=>{
+    const r=t.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;
+    t.style.transform=`perspective(900px) rotateY(${x*4}deg) rotateX(${-y*4}deg)`;
+  });
+  t.addEventListener('mouseleave',()=>t.style.transform='');
+})();
+
+// scroll reveal
+const io=new IntersectionObserver(es=>es.forEach(e=>{
+  if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
+document.querySelectorAll('.rv').forEach(el=>io.observe(el));
+
+// count-up
+const io2=new IntersectionObserver(es=>es.forEach(e=>{
+  if(!e.isIntersecting)return;io2.unobserve(e.target);
+  const el=e.target,end=+el.dataset.count,t0=performance.now();
+  (function tick(t){const k=Math.min((t-t0)/1300,1);
+    el.textContent=Math.round(end*(1-Math.pow(1-k,3)));
+    if(k<1)requestAnimationFrame(tick)})(t0);
+}),{threshold:.5});
+document.querySelectorAll('[data-count]').forEach(el=>io2.observe(el));
+</script>
+</body>
+</html>
