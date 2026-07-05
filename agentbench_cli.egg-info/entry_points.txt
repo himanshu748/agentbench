@@ -1,0 +1,2 @@
+[console_scripts]
+agentbench = cli.agentbench:main

@@ -7,11 +7,11 @@ import os
 
 import httpx
 
-SUPA_URL = os.environ.get("SUPA_URL", "https://tmsfudajqumspruyssov.supabase.co")
-SUPA_KEY = os.environ.get(
-    "SUPA_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtc2Z1ZGFqcXVtc3BydXlzc292Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MDEwMjYsImV4cCI6MjA5ODI3NzAyNn0.JjHmxrJMx-G6Dj14FCgiSY3V3Gsivl0cLnq-K3ibvgg",
-)
+from . import mesh_client  # noqa: F401  (ensures .env is loaded first)
+
+SUPA_URL = os.environ.get("SUPA_URL", "")
+SUPA_KEY = os.environ.get("SUPA_KEY", "")
+ENABLED = bool(SUPA_URL and SUPA_KEY)
 TABLE = f"{SUPA_URL}/rest/v1/agentbench_runs"
 HEADERS = {"apikey": SUPA_KEY, "Authorization": f"Bearer {SUPA_KEY}",
            "Content-Type": "application/json"}
@@ -19,6 +19,8 @@ HEADERS = {"apikey": SUPA_KEY, "Authorization": f"Bearer {SUPA_KEY}",
 
 async def save_run(run: dict):
     """Best-effort persist; a storage failure never breaks a benchmark."""
+    if not ENABLED:
+        return
     try:
         async with httpx.AsyncClient(timeout=8) as c:
             await c.post(TABLE, headers={**HEADERS, "Prefer": "resolution=ignore-duplicates"},
@@ -29,6 +31,8 @@ async def save_run(run: dict):
 
 
 async def get_run(run_id: str) -> dict | None:
+    if not ENABLED:
+        return None
     try:
         async with httpx.AsyncClient(timeout=8) as c:
             r = await c.get(TABLE, headers=HEADERS,

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentbench-cli"
+version = "1.0.0"
+description = "CI/CD for AI prompts and agents. Behavior tests across 500+ models via MeshAPI."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Himanshu Jha" }]
+keywords = ["llm", "testing", "ci", "prompts", "meshapi", "evals"]
+
+[project.urls]
+Homepage = "https://agentbench-three.vercel.app"
+Repository = "https://github.com/himanshu748/agentbench"
+
+[project.scripts]
+agentbench = "cli.agentbench:main"
+
+[tool.setuptools]
+packages = ["cli"]

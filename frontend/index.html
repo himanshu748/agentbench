@@ -255,7 +255,7 @@ footer b{color:var(--brand);font-weight:600}
   <div class="stat rv"><b><i data-count="1000">0</i>+</b><span>LLMs on MeshAPI<br>
     <span style="font:11px var(--mono);color:var(--dim)" id="livecount"></span></span></div>
   <div class="stat rv d1"><b>&frac12;<span style="font-size:22px">&cent;</span></b><span>for a full benchmark run</span></div>
-  <div class="stat rv d2"><b><i data-count="6">0</i></b><span>ready-made use case suites</span></div>
+  <div class="stat rv d2"><b><i id="suitecount" data-count="7">0</i></b><span>ready-made use case suites</span></div>
   <div class="stat rv d3"><b><i data-count="5">0</i>s</b><span>from prompt to verdict, measured live</span></div>
 </div></div>
 
@@ -265,7 +265,7 @@ footer b{color:var(--brand);font-weight:600}
   <p class="sec-sub rv">LLM output changes on every call, so string equality can never test it. AgentBench tags each test with a behavior category and a judge model scores every response against that category's rubric.</p>
   <div class="steps">
     <div class="step rv"><div class="n">1</div><h3>Define tests in YAML</h3>
-      <p>Each case is an input plus an expected behavior: <code>requires_clarification</code>, <code>injection_resistance</code>, <code>conciseness</code>, <code>tone_deescalation</code>, or <code>no_fabrication</code>. Five tests take five minutes. Or let the red team generator write them for you.</p></div>
+      <p>Each case is an input plus an expected behavior. Eight built-in categories, from <code>injection_resistance</code> to <code>pii_refusal</code> and <code>format_compliance</code>, plus <code>custom</code> with your own plain-English rubric. Or let the red team generator write the tests for you.</p></div>
     <div class="step rv d1"><div class="n">2</div><h3>Run across models</h3>
       <p>Every test hits every model you pick, concurrently, through MeshAPI's unified endpoint. Include <code>auto</code> to benchmark MeshAPI's smart routing against fixed models. Timeouts become error cells. Nothing crashes a run.</p></div>
     <div class="step rv d2"><div class="n">3</div><h3>Read the verdict</h3>
@@ -275,7 +275,7 @@ footer b{color:var(--brand);font-weight:600}
 
 <section id="cases" style="padding-top:0"><div class="wrap">
   <div class="sec-kicker rv">Use cases</div>
-  <h2 class="rv">Six suites, ready to run.</h2>
+  <h2 class="rv">Seven suites, ready to run.</h2>
   <p class="sec-sub rv">Every suite encodes the failure modes that actually burn teams in production. Load one, or use them as templates for your own bot.</p>
   <div class="cases">
     <a class="case rv" href="/app"><span class="em">&#127981;</span><h3>Customer Support Bot</h3>
@@ -290,6 +290,8 @@ footer b{color:var(--brand);font-weight:600}
       <p>Playbook leaks, fabricated ROI numbers, context-free draft requests.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
     <a class="case rv d5" href="/app"><span class="em">&#128101;</span><h3>HR Policy Bot</h3>
       <p>Location-dependent answers, confidential guidance, invented stipends.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+    <a class="case rv d5" href="/app"><span class="em">&#127908;</span><h3>Brand Voice Bot</h3>
+      <p>Custom rubrics: lowercase-only voice, language matching, JSON format, PII refusal.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
   </div>
 </div></section>
 
@@ -363,6 +365,9 @@ playGrid();
 fetch('/api/meta').then(r=>r.json()).then(m=>{
   if(m.model_count)document.getElementById('livecount').textContent=
     m.model_count+' in the live catalog ('+m.chat_count+' chat)';
+}).catch(()=>{});
+fetch('/api/suites').then(r=>r.json()).then(s=>{
+  document.getElementById('suitecount').dataset.count=s.length;
 }).catch(()=>{});
 
 // scroll progress bar

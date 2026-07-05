@@ -1,3 +1,15 @@
+Metadata-Version: 2.4
+Name: agentbench-cli
+Version: 1.0.0
+Summary: CI/CD for AI prompts and agents. Behavior tests across 500+ models via MeshAPI.
+Author: Himanshu Jha
+License: MIT
+Project-URL: Homepage, https://agentbench-three.vercel.app
+Project-URL: Repository, https://github.com/himanshu748/agentbench
+Keywords: llm,testing,ci,prompts,meshapi,evals
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+
 # AgentBench
 
 **CI/CD for AI prompts and agents.** Behavior tests for your prompt, run across the models on MeshAPI, with pass rates, real cost, latency, a fix for what fails, and a build-style badge.
