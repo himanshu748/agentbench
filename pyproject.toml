@@ -11,6 +11,9 @@ requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Himanshu Jha" }]
 keywords = ["llm", "testing", "ci", "prompts", "meshapi", "evals"]
+# The CLI itself is stdlib-only; these cover the server when Vercel installs
+# from pyproject instead of requirements.txt.
+dependencies = ["fastapi>=0.111", "httpx>=0.27", "pyyaml>=6.0"]
 
 [project.urls]
 Homepage = "https://agentbench-three.vercel.app"
