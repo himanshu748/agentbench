@@ -43,6 +43,71 @@ agentbench run suites/customer-support.yaml \
     models: openai/gpt-4o-mini,anthropic/claude-haiku-4.5
 ```
 
+### Setup in your own repo
+
+1. Add a suite YAML somewhere in your repo (e.g. `suites/customer-support.yaml`), using the format below.
+2. Create `.github/workflows/prompt-ci.yml`:
+   ```yaml
+   name: Prompt CI
+   on: pull_request
+
+   jobs:
+     agentbench:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v4
+         - uses: himanshu748/agentbench@v1
+           with:
+             suite: suites/customer-support.yaml
+             models: openai/gpt-4o-mini,anthropic/claude-haiku-4.5
+   ```
+3. Push. No secrets needed — the Action calls the hosted `agentbench-three.vercel.app` backend by default, which already holds the MeshAPI key. Every PR that touches your trigger path now runs the suite and fails the check (blocking merge) if the recommended model fails a test.
+
+   Only add a `url:` input (pointing at your own deployment) if you're self-hosting the backend — in that case, your deployment needs its own `MESH_API_KEY`.
+
+## How the CI/CD gate actually works
+
+There's no magic running inside GitHub's runner — it's a thin client hitting a server:
+
+```
+GitHub Actions runner (or your laptop)
+        │
+        │ runs: python cli/agentbench.py run suite.yaml --models ...
+        ▼
+cli/agentbench.py ── HTTP POST ──► AGENTBENCH_URL
+                                     (defaults to the hosted
+                                      agentbench-three.vercel.app,
+                                      or your own `uvicorn` instance)
+                                            │
+                                    FastAPI backend does the real work:
+                                    calls MeshAPI for each model, scores
+                                    every response with the judge model
+                                            │
+                                    returns JSON: pass/fail per test,
+                                    cost, latency, a recommendation
+        ◄────────────────────────────────────┘
+CLI prints a pass/fail table and exits 1 if the recommended
+model failed any test -> that non-zero exit fails your CI job.
+```
+
+`action.yml` just checks out your repo and runs that same CLI script — so anywhere the CLI works, the Action works.
+
+**Try it locally without touching GitHub:**
+
+```bash
+# against the hosted server (default) — no setup needed
+python3 cli/agentbench.py run suites/customer-support.yaml \
+  --models openai/gpt-4o-mini,anthropic/claude-haiku-4.5
+# echo $? -> 0 if the recommended model passed everything, 1 if not
+
+# against your own backend, e.g. to test a suite before pushing
+uvicorn backend.main:app --port 8000 &
+AGENTBENCH_URL=http://localhost:8000 python3 cli/agentbench.py run \
+  suites/customer-support.yaml --models openai/gpt-4o-mini
+```
+
+Custom rubric tests and the red-team generator use this same backend, not a CLI-only path — `POST /api/suites` validates and stores a custom-rubric suite, `POST /api/redteam` asks the judge model to write adversarial tests for your system prompt. Both work identically whether you're hitting the hosted server or your own local one; the CLI/Action only ever talks to whatever suite_id or YAML you give it.
+
 ## Suite format
 
 ```yaml
