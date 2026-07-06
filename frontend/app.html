@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentBench Console</title>
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -204,7 +205,7 @@ dialog pre{white-space:pre-wrap;font:12px var(--mono);background:var(--raised);p
 <div class="orb a"></div><div class="orb b"></div>
 
 <nav><div class="inner">
-  <a class="logo" href="/"><span class="dot"></span>AgentBench</a>
+  <a class="logo" href="/"><img src="/static/logo.svg" alt="" style="width:22px;height:22px;border-radius:6px">AgentBench</a>
   <span class="crumb">/ console</span>
   <div class="navr">
     <span class="judgechip" id="judgechip">judge: <i>...</i></span>
@@ -418,8 +419,10 @@ function fillLiveCell(r,models){
     $('livebody').appendChild(row)}
   const cls=r.status==='error'?'err':(r.pass?'pass':'fail');
   const label=r.status==='error'?'&#9888; error':(r.pass?'&#10003; pass':'&#10007; fail');
+  const idx=liveResults.length-1;
   row.querySelector(`td[data-m="${r.model}"]`).innerHTML=
-    `<div class="cell ${cls}"><b>${label}</b><small>${r.latency_ms}ms &middot; $${r.cost_usd.toFixed(5)}</small></div>`;
+    `<div class="cell ${cls}" title="View the agent's reply" onclick="showDetailObj(liveResults[${idx}])">
+      <b>${label}</b><small>${r.latency_ms}ms &middot; $${r.cost_usd.toFixed(5)}</small></div>`;
 }
 function cssq(s){return btoa(unescape(encodeURIComponent(s))).slice(0,24).replace(/[+/=]/g,'_')}
 
@@ -449,10 +452,11 @@ function render(run){
       const r=byKey[row.input+'|'+m];
       const cls=r.status==='error'?'err':(r.pass?'pass':'fail');
       const label=r.status==='error'?'&#9888; error':(r.pass?'&#10003; pass':'&#10007; fail');
-      html+=`<td><div class="cell ${cls}" style="animation-delay:${ci*45}ms" onclick="showDetail(${r.idx})">
+      html+=`<td><div class="cell ${cls}" style="animation-delay:${ci*45}ms" title="View the agent's reply" onclick="showDetail(${r.idx})">
         <b>${label}</b><small>${r.latency_ms}ms &middot; $${r.cost_usd.toFixed(5)}</small></div></td>`;ci++}
     html+='</tr>'}
   html+='</table></div>';
+  html+='<div style="margin-top:9px;font:11px var(--mono);color:var(--dim)">&#128269; Click any cell to read the agent\'s full reply and the judge\'s reasoning.</div>';
   html+='<div class="permodel">'+s.per_model.map(p=>
     `<span><b>${p.model==='auto'?'auto':p.model.split('/').pop()}</b> ${p.passed}/${p.total} &middot; $${p.total_cost_usd.toFixed(4)} &middot; ${p.avg_latency_ms}ms</span>`).join('')+'</div>';
 
@@ -485,9 +489,15 @@ function render(run){
 }
 function viewFixed(){const tmp=lastRun;lastRun=fixedRun;const f=fixedRun;fixedRun=null;render(f);lastRun=tmp}
 
-function showDetail(i){const r=lastRun.results[i];
+function showDetail(i){showDetailObj(lastRun.results[i])}
+function showDetailObj(r){
   $('dlgbody').innerHTML=`<b style="font-family:var(--mono)">${r.model}</b> &middot; <span class="catlabel">${r.category}</span>
-    <pre>INPUT:\n${esc(r.input)}\n\nRESPONSE:\n${esc(r.response)}\n\nJUDGE: ${r.pass?'PASS':'FAIL'} (confidence ${r.confidence??'n/a'})\n${esc(r.reason||'')}</pre>`;
+    <label style="display:block;font:600 10px var(--mono);letter-spacing:.1em;color:var(--dim);margin-top:14px">USER INPUT</label>
+    <pre style="margin-top:6px">${esc(r.input)}</pre>
+    <label style="display:block;font:600 10px var(--mono);letter-spacing:.1em;color:var(--brand);margin-top:12px">AGENT REPLY</label>
+    <pre style="margin-top:6px;border-left:2px solid var(--brand);">${esc(r.response)}</pre>
+    <label style="display:block;font:600 10px var(--mono);letter-spacing:.1em;color:${r.pass?'var(--brand)':'var(--fail)'};margin-top:12px">JUDGE: ${r.pass?'PASS':'FAIL'} (confidence ${r.confidence??'n/a'})</label>
+    <pre style="margin-top:6px">${esc(r.reason||'')}</pre>`;
   dlg.showModal()}
 function exportReport(){const blob=new Blob([JSON.stringify(fixedRun?{original:lastRun,fixed:fixedRun}:lastRun,null,2)],
   {type:'application/json'});const a=document.createElement('a');
