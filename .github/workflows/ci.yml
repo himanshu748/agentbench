@@ -1,0 +1,101 @@
+# AgentBench's own CI. Runs entirely in MOCK mode: no MESH_API_KEY, no network,
+# no spend — so it is safe to run on forks and pull requests.
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # The backend uses PEP 604 annotations, so 3.10 is its floor;
+        # 3.12 is what Vercel runs. The CLI's own 3.9 floor is checked below.
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Test
+        env:
+          MESH_API_KEY: ""   # force mock mode: no live calls, no spend
+        run: pytest -q
+
+  cli-python-floor:
+    # Only `cli` is packaged (pyproject: packages = ["cli"]) and the GitHub
+    # Action runs it with nothing installed, so it must stay importable on the
+    # oldest Python the project claims to support.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: CLI must byte-compile and run with no dependencies
+        run: |
+          python -m py_compile cli/agentbench.py
+          python cli/agentbench.py --help
+          python cli/agentbench.py run --help
+
+  cli-smoke:
+    # The Action runs the CLI on a bare runner, so prove it needs nothing installed.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install server deps only
+        run: pip install -r requirements.txt uvicorn
+
+      - name: Start AgentBench in mock mode
+        run: |
+          uvicorn backend.main:app --port 8000 &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/health && break
+            sleep 1
+          done
+
+      - name: Run a suite through the CLI (stdlib only)
+        env:
+          AGENTBENCH_URL: http://127.0.0.1:8000
+        run: |
+          python3 cli/agentbench.py suites
+          python3 cli/agentbench.py run suites/customer-support.yaml \
+            --models openai/gpt-4o-mini --min-pass-rate 0
+
+      - name: An unreachable server exits 2, not 0 or 1
+        run: |
+          set +e
+          AGENTBENCH_URL=http://127.0.0.1:9 python3 cli/agentbench.py run \
+            suites/customer-support.yaml --models openai/gpt-4o-mini >/dev/null 2>&1
+          code=$?
+          set -e
+          # CI must be able to tell "the prompt regressed" (1) from "the tool
+          # could not run" (2). A silent 0 here would make the gate useless.
+          if [ "$code" -ne 2 ]; then echo "expected exit 2, got $code"; exit 1; fi

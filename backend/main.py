@@ -1,9 +1,12 @@
 """AgentBench API — CI/CD for AI prompts and agents (MeshAPI hackathon)."""
 import asyncio
+import collections
+import contextlib
 import json
 import pathlib
 import time
 import uuid
+from xml.sax.saxutils import escape as xml_escape
 
 import yaml
 from fastapi import FastAPI, HTTPException, Request
@@ -15,39 +18,102 @@ from . import mesh_client, runner, judge, storage
 
 # --- abuse guards (public demo runs on a real MeshAPI balance) ---
 MAX_CELLS_PER_RUN = 40          # tests x models ceiling
+MAX_TESTS_PER_SUITE = 40        # a suite is only useful up to the cell ceiling
+MAX_INPUT_CHARS = 8_000         # per test input
+MAX_PROMPT_CHARS = 20_000       # per system prompt / rubric
+MAX_YAML_CHARS = 200_000        # uploaded suite document
+MAX_USER_SUITES = 500           # bounded LRU: user-created suites live in memory
 RATE_LIMIT = 8                  # runs per window per IP (per warm instance)
 RATE_WINDOW = 600               # seconds
 _ip_hits: dict[str, list] = {}
 
 
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
 def _check_rate(request: Request):
-    ip = (request.headers.get("x-forwarded-for") or request.client.host or "?").split(",")[0]
+    """Sliding-window limit. Every endpoint that can spend MeshAPI credit calls this."""
+    ip = _client_ip(request)
     now = time.time()
+    # Drop windows that have fully expired, otherwise _ip_hits grows for the
+    # lifetime of the instance — one entry per IP that ever hit the demo.
+    for known, stamps in list(_ip_hits.items()):
+        if not stamps or now - stamps[-1] >= RATE_WINDOW:
+            del _ip_hits[known]
     hits = [t for t in _ip_hits.get(ip, []) if now - t < RATE_WINDOW]
     if len(hits) >= RATE_LIMIT:
-        raise HTTPException(429, "Rate limit reached. Try again in a few minutes.")
+        retry_after = int(RATE_WINDOW - (now - hits[0])) + 1
+        raise HTTPException(429, "Rate limit reached. Try again in a few minutes.",
+                            headers={"Retry-After": str(retry_after)})
     hits.append(now)
     _ip_hits[ip] = hits
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-app = FastAPI(title="AgentBench")
 
-SUITES: dict[str, dict] = {}
+BUILTIN_SUITES: dict[str, dict] = {}
+# User-created suites (builder UI, CLI uploads, red team) are ephemeral and
+# bounded; built-ins are never evicted.
+USER_SUITES: collections.OrderedDict[str, dict] = collections.OrderedDict()
+
+
+class _SuiteRegistry:
+    """Built-in suites plus a bounded set of user-created ones, as one mapping.
+
+    Built-ins are permanent. User suites (builder UI, CLI uploads, red team)
+    live only in the instance's memory and are evicted oldest-first once the
+    cap is reached, so a public instance cannot be grown without limit by
+    repeated POSTs. Eviction is insertion-ordered rather than least-recently-
+    used so the order the console lists them in stays stable.
+    """
+
+    def __contains__(self, suite_id) -> bool:
+        return suite_id in BUILTIN_SUITES or suite_id in USER_SUITES
+
+    def __getitem__(self, suite_id) -> dict:
+        if suite_id in BUILTIN_SUITES:
+            return BUILTIN_SUITES[suite_id]
+        return USER_SUITES[suite_id]
+
+    def __setitem__(self, suite_id, suite: dict):
+        USER_SUITES[suite_id] = suite
+        while len(USER_SUITES) > MAX_USER_SUITES:
+            USER_SUITES.popitem(last=False)
+
+    def get(self, suite_id, default=None):
+        return self[suite_id] if suite_id in self else default
+
+    def values(self):
+        return [*BUILTIN_SUITES.values(), *USER_SUITES.values()]
+
+    def __len__(self) -> int:
+        return len(BUILTIN_SUITES) + len(USER_SUITES)
+
+
+SUITES = _SuiteRegistry()
 
 
 def _load_builtin_suites():
     for f in sorted((ROOT / "suites").glob("*.yaml")):
         suite = yaml.safe_load(f.read_text())
         suite_id = f.stem
-        SUITES[suite_id] = {"suite_id": suite_id, **suite}
+        BUILTIN_SUITES[suite_id] = {"suite_id": suite_id, **suite}
 
 
 _load_builtin_suites()
 
 
-@app.on_event("startup")
-async def _startup():
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
     await mesh_client.refresh_models()
+    yield
+    await mesh_client.aclose()
+
+
+app = FastAPI(title="AgentBench", lifespan=lifespan)
 
 
 class SuiteIn(BaseModel):
@@ -73,6 +139,13 @@ class FixRerunIn(BaseModel):
     fixed_prompt: str
 
 
+@app.get("/api/health")
+def health():
+    """Cheap liveness/readiness probe — no MeshAPI call, safe to poll."""
+    return {"status": "ok", "mock": mesh_client.MOCK,
+            "suites": len(SUITES), "storage": storage.ENABLED}
+
+
 @app.get("/api/meta")
 def meta():
     return {"models": mesh_client.AVAILABLE_MODELS,
@@ -96,19 +169,64 @@ def get_suite(suite_id: str):
     return SUITES[suite_id]
 
 
+def _validate_suite(suite) -> dict:
+    """Validate a parsed suite document. Raises ValueError with a usable message.
+
+    Bounds matter as much as shape here: suites are held in memory on a public
+    demo, so an unbounded prompt or a 10k-test document is a denial-of-service
+    vector, not just a malformed input.
+    """
+    if not isinstance(suite, dict):
+        raise ValueError("suite must be a YAML mapping")
+    prompt = suite.get("system_prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("missing system_prompt")
+    if len(prompt) > MAX_PROMPT_CHARS:
+        raise ValueError(f"system_prompt too long (max {MAX_PROMPT_CHARS} chars)")
+    tests = suite.get("tests")
+    if not isinstance(tests, list) or not tests:
+        raise ValueError("missing tests")
+    if len(tests) > MAX_TESTS_PER_SUITE:
+        raise ValueError(f"too many tests (max {MAX_TESTS_PER_SUITE})")
+    for i, t in enumerate(tests, 1):
+        if not isinstance(t, dict):
+            raise ValueError(f"test {i}: must be a mapping")
+        if not isinstance(t.get("input"), str) or not t["input"].strip():
+            raise ValueError(f"test {i}: needs a non-empty input")
+        if len(t["input"]) > MAX_INPUT_CHARS:
+            raise ValueError(f"test {i}: input too long (max {MAX_INPUT_CHARS} chars)")
+        category = t.get("category")
+        if not isinstance(category, str) or not category:
+            raise ValueError(f"test {i}: needs a category")
+        if category == "custom":
+            rubric = t.get("rubric")
+            if not isinstance(rubric, str) or not rubric.strip():
+                raise ValueError(f"test {i}: custom category tests need a rubric field")
+            if len(rubric) > MAX_PROMPT_CHARS:
+                raise ValueError(f"test {i}: rubric too long (max {MAX_PROMPT_CHARS} chars)")
+        elif category not in judge.RUBRICS:
+            raise ValueError(f"test {i}: unknown category '{category}' "
+                             f"(known: {', '.join(judge.CATEGORIES)}, custom)")
+    name = suite.get("name")
+    if name is not None and not isinstance(name, str):
+        raise ValueError("name must be a string")
+    return {"name": (name or "Untitled suite")[:120],
+            "system_prompt": prompt,
+            "tests": tests}
+
+
 @app.post("/api/suites")
 def create_suite(body: SuiteIn):
+    if len(body.yaml_text) > MAX_YAML_CHARS:
+        raise HTTPException(400, f"invalid suite: document too large "
+                                 f"(max {MAX_YAML_CHARS} chars)")
     try:
-        suite = yaml.safe_load(body.yaml_text)
-        assert isinstance(suite, dict) and suite.get("tests"), "missing tests"
-        assert suite.get("system_prompt"), "missing system_prompt"
-        for t in suite["tests"]:
-            assert t.get("input") and t.get("category"), "each test needs input+category"
-            if t["category"] == "custom":
-                assert t.get("rubric"), "custom category tests need a rubric field"
-            elif t["category"] not in judge.RUBRICS:
-                raise ValueError(f"unknown category: {t['category']}")
-    except Exception as e:
+        parsed = yaml.safe_load(body.yaml_text)
+    except yaml.YAMLError as e:
+        raise HTTPException(400, f"invalid suite: could not parse YAML: {e}")
+    try:
+        suite = _validate_suite(parsed)
+    except ValueError as e:
         raise HTTPException(400, f"invalid suite: {e}")
     suite_id = "custom-" + uuid.uuid4().hex[:8]
     SUITES[suite_id] = {"suite_id": suite_id, **suite}
@@ -118,9 +236,21 @@ def create_suite(body: SuiteIn):
 def _validate_run(suite_id: str, model_list: list) -> tuple:
     if suite_id not in SUITES:
         raise HTTPException(404, "suite not found")
-    models = [m for m in model_list if m in mesh_client.AVAILABLE_MODELS]
+    # De-duplicate while preserving order: repeating a model in the request
+    # would otherwise double the spend and make the per-model table ambiguous.
+    seen, models = set(), []
+    for m in model_list:
+        m = m.strip()
+        if m and m not in seen and m in mesh_client.AVAILABLE_MODELS:
+            seen.add(m)
+            models.append(m)
     if not (1 <= len(models) <= 4):
-        raise HTTPException(400, "select 1-4 valid models")
+        unknown = [m.strip() for m in model_list
+                   if m.strip() and m.strip() not in mesh_client.AVAILABLE_MODELS]
+        detail = "select 1-4 valid models"
+        if unknown:
+            detail += f" (unknown: {', '.join(sorted(set(unknown))[:4])})"
+        raise HTTPException(400, detail)
     suite = SUITES[suite_id]
     if len(suite["tests"]) * len(models) > MAX_CELLS_PER_RUN:
         raise HTTPException(400, f"run too large: max {MAX_CELLS_PER_RUN} cells per run")
@@ -140,6 +270,10 @@ async def create_run(body: RunIn, request: Request):
     return {"run_id": runner.start_run(suite, models)}
 
 
+def _sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
 @app.get("/api/runs/stream")
 async def stream_run(suite_id: str, models: str, request: Request):
     """SSE: emits one 'cell' event per judged result, then a 'done' event."""
@@ -148,27 +282,39 @@ async def stream_run(suite_id: str, models: str, request: Request):
 
     async def gen():
         queue: asyncio.Queue = asyncio.Queue()
-        total = len(suite["tests"]) * len(model_list)
-        yield f"event: start\ndata: {json.dumps({'total': total})}\n\n"
-
-        async def worker(test, model):
-            res = await runner._run_one(asyncio.Semaphore(1), suite["system_prompt"], test, model)
-            await queue.put(res)
+        pairs = [(t, m) for t in suite["tests"] for m in model_list]
+        total = len(pairs)
+        yield _sse("start", {"total": total})
 
         sem = asyncio.Semaphore(runner.CONCURRENCY)
 
-        async def bounded(test, model):
-            async with sem:
-                await worker(test, model)
+        async def worker(test, model):
+            # Every worker must enqueue exactly one cell, including on failure:
+            # the reader below consumes a fixed `total` and would otherwise wait
+            # on a cell that never arrives, hanging the stream until the client
+            # or the platform times it out.
+            try:
+                res = await runner._run_one(sem, suite["system_prompt"], test, model)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                res = runner.cell_error(test, model, e)
+            await queue.put(res)
 
-        tasks = [asyncio.create_task(bounded(t, m))
-                 for t in suite["tests"] for m in model_list]
+        tasks = [asyncio.create_task(worker(t, m)) for t, m in pairs]
         results = []
-        for _ in range(total):
-            res = await queue.get()
-            results.append(res)
-            yield f"event: cell\ndata: {json.dumps(res)}\n\n"
-        await asyncio.gather(*tasks)
+        try:
+            for _ in range(total):
+                res = await queue.get()
+                results.append(res)
+                yield _sse("cell", res)
+        except asyncio.CancelledError:
+            # Client navigated away mid-run: stop paying for the rest of it.
+            for task in tasks:
+                task.cancel()
+            raise
+        finally:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         summary = runner._recommend(results, model_list)
         fix = None
@@ -179,12 +325,14 @@ async def stream_run(suite_id: str, models: str, request: Request):
                 [{"input": f["input"], "category": f["category"], "reason": f["reason"]}
                  for f in failures[:8]])
         done = {"run_id": uuid.uuid4().hex[:12], "status": "done",
-                "suite_name": suite.get("name"), "models": model_list,
+                "suite_name": suite.get("name"), "suite_id": suite.get("suite_id"),
+                "system_prompt": suite.get("system_prompt"),
+                "models": model_list,
                 "results": results, "summary": summary, "suggested_prompt": fix,
                 "mock": mesh_client.MOCK}
-        runner.RUNS[done["run_id"]] = done
+        runner._remember(done["run_id"], done)
         await storage.save_run(done)
-        yield f"event: done\ndata: {json.dumps(done)}\n\n"
+        yield _sse("done", done)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
@@ -192,17 +340,31 @@ async def stream_run(suite_id: str, models: str, request: Request):
 
 
 @app.post("/api/fix-rerun")
-async def fix_rerun(body: FixRerunIn):
-    """Re-run a suite with the AI-fixed system prompt (before/after loop)."""
-    if body.suite_id not in SUITES:
-        raise HTTPException(404, "suite not found")
-    suite = {**SUITES[body.suite_id], "system_prompt": body.fixed_prompt}
-    return await runner.run_sync(suite, body.models)
+async def fix_rerun(body: FixRerunIn, request: Request):
+    """Re-run a suite with the AI-fixed system prompt (before/after loop).
+
+    This spends MeshAPI credit exactly like /api/runs does, so it goes through
+    the same rate limit, model allowlist and cell ceiling.
+    """
+    _check_rate(request)
+    if not body.fixed_prompt.strip():
+        raise HTTPException(400, "fixed_prompt is required")
+    if len(body.fixed_prompt) > MAX_PROMPT_CHARS:
+        raise HTTPException(400, f"fixed_prompt too long (max {MAX_PROMPT_CHARS} chars)")
+    suite, models = _validate_run(body.suite_id, body.models)
+    run = await runner.run_sync({**suite, "system_prompt": body.fixed_prompt}, models)
+    await storage.save_run(run)
+    return run
 
 
 @app.post("/api/redteam")
-async def redteam(body: RedTeamIn):
+async def redteam(body: RedTeamIn, request: Request):
     """Generate adversarial test cases for a system prompt via MeshAPI."""
+    _check_rate(request)
+    if not body.system_prompt.strip():
+        raise HTTPException(400, "system_prompt is required")
+    if len(body.system_prompt) > MAX_PROMPT_CHARS:
+        raise HTTPException(400, f"system_prompt too long (max {MAX_PROMPT_CHARS} chars)")
     n = max(3, min(body.n, 10))
     result = await mesh_client.chat(mesh_client.DEFAULT_JUDGE_MODEL, [
         {"role": "system", "content":
@@ -227,24 +389,35 @@ async def redteam(body: RedTeamIn):
     except Exception:
         raise HTTPException(502, "red-team output could not be parsed")
     suite_id = "redteam-" + uuid.uuid4().hex[:8]
-    SUITES[suite_id] = {"suite_id": suite_id, "name": body.name,
+    SUITES[suite_id] = {"suite_id": suite_id, "name": (body.name or "Red Team Suite")[:120],
                         "system_prompt": body.system_prompt, "tests": tests}
     return SUITES[suite_id]
 
 
+BADGE_MAX_LABEL = 28
+
+
 @app.get("/api/badge.svg")
-def badge(label: str = "suite", passed: int = 0, total: int = 0):
+def badge(label: str = "AgentBench", passed: int = 0, total: int = 0):
     """Shareable CI-style badge. Data is URL-encoded so no storage is needed."""
+    passed = max(0, min(passed, 10_000))
+    total = max(0, min(total, 10_000))
+    passed = min(passed, total) if total else 0
     ok = total > 0 and passed == total
     color = "#2BE58A" if ok else ("#FFB224" if passed else "#FF5D5D")
     status = f"{passed}/{total} pass"
-    lw, rw = 6.5 * len("AgentBench") + 22, 6.5 * len(status) + 20
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{lw+rw:.0f}" height="24" role="img">
+    # The label is caller-supplied (suite names come from user YAML), so it is
+    # length-capped and XML-escaped before it reaches the document.
+    label = (label or "AgentBench").strip()[:BADGE_MAX_LABEL] or "AgentBench"
+    left, right = xml_escape(label), xml_escape(status)
+    lw, rw = 6.5 * len(label) + 22, 6.5 * len(status) + 20
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{lw+rw:.0f}" height="24" role="img" aria-label="{left}: {right}">
+<title>{left}: {right}</title>
 <rect width="{lw:.0f}" height="24" rx="4" fill="#0D1117"/>
 <rect x="{lw:.0f}" width="{rw:.0f}" height="24" rx="4" fill="{color}"/>
 <rect x="{lw-4:.0f}" width="8" height="24" fill="{color}"/>
-<text x="{lw/2:.0f}" y="16" fill="#E8EDF4" font-family="monospace" font-size="11" text-anchor="middle">AgentBench</text>
-<text x="{lw+rw/2:.0f}" y="16" fill="#07090D" font-family="monospace" font-size="11" font-weight="bold" text-anchor="middle">{status}</text>
+<text x="{lw/2:.0f}" y="16" fill="#E8EDF4" font-family="monospace" font-size="11" text-anchor="middle">{left}</text>
+<text x="{lw+rw/2:.0f}" y="16" fill="#07090D" font-family="monospace" font-size="11" font-weight="bold" text-anchor="middle">{right}</text>
 </svg>'''
     from fastapi.responses import Response
     return Response(svg, media_type="image/svg+xml",
