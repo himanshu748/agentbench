@@ -256,7 +256,7 @@ footer b{color:var(--brand);font-weight:600}
   <div class="stat rv"><b><i data-count="1000">0</i>+</b><span>LLMs on MeshAPI<br>
     <span style="font:11px var(--mono);color:var(--dim)" id="livecount"></span></span></div>
   <div class="stat rv d1"><b>&frac12;<span style="font-size:22px">&cent;</span></b><span>for a full benchmark run</span></div>
-  <div class="stat rv d2"><b><i id="suitecount" data-count="7">0</i></b><span>ready-made use case suites</span></div>
+  <div class="stat rv d2"><b><i id="suitecount" data-count="15">0</i></b><span>ready-made use case suites</span></div>
   <div class="stat rv d3"><b><i data-count="5">0</i>s</b><span>from prompt to verdict, measured live</span></div>
 </div></div>
 
@@ -266,7 +266,7 @@ footer b{color:var(--brand);font-weight:600}
   <p class="sec-sub rv">LLM output changes on every call, so string equality can never test it. AgentBench tags each test with a behavior category and a judge model scores every response against that category's rubric.</p>
   <div class="steps">
     <div class="step rv"><div class="n">1</div><h3>Define tests in YAML</h3>
-      <p>Each case is an input plus an expected behavior. Eight built-in categories, from <code>injection_resistance</code> to <code>pii_refusal</code> and <code>format_compliance</code>, plus <code>custom</code> with your own plain-English rubric. Or let the red team generator write the tests for you.</p></div>
+      <p>Each case is an input plus an expected behavior. Sixteen built-in categories — from <code>injection_resistance</code> and <code>pii_refusal</code> to <code>context_grounding</code>, <code>numeric_accuracy</code>, <code>over_refusal</code> and <code>safety_refusal</code> — plus <code>custom</code> with your own plain-English rubric. Or let the red team generator write the tests for you.</p></div>
     <div class="step rv d1"><div class="n">2</div><h3>Run across models</h3>
       <p>Every test hits every model you pick, concurrently, through MeshAPI's unified endpoint. Include <code>auto</code> to benchmark MeshAPI's smart routing against fixed models. Timeouts become error cells. Nothing crashes a run.</p></div>
     <div class="step rv d2"><div class="n">3</div><h3>Read the verdict</h3>
@@ -276,7 +276,7 @@ footer b{color:var(--brand);font-weight:600}
 
 <section id="cases" style="padding-top:0"><div class="wrap">
   <div class="sec-kicker rv">Use cases</div>
-  <h2 class="rv">Seven suites, ready to run.</h2>
+  <h2 class="rv">Fifteen suites, ready to run.</h2>
   <p class="sec-sub rv">Every suite encodes the failure modes that actually burn teams in production. Load one, or use them as templates for your own bot.</p>
   <div class="cases">
     <a class="case rv" href="/app"><span class="em">&#127981;</span><h3>Customer Support Bot</h3>
@@ -308,7 +308,7 @@ footer b{color:var(--brand);font-weight:600}
       <p>Paste your system prompt and AgentBench writes the adversarial tests for you: injection attacks, fabrication bait, hostile users, missing-context traps. Then it runs them.</p></div>
     <div class="feat rv d2"><div class="pill">CI/CD</div><div class="icon">&#128200;</div>
       <h3>Regression timeline</h3>
-      <p>Every run lands in a history timeline. Change your prompt, run again, and see exactly which model and which behavior category regressed, with deltas between runs.</p></div>
+      <p>Every run lands in a history timeline. Change your prompt, run again, and see exactly which model and which behavior category regressed, with deltas between runs. Run each test several times to measure flakiness — the same non-determinism that makes exact-match testing impossible, now quantified.</p></div>
     <div class="feat rv d3"><div class="pill">SHAREABLE</div><div class="icon">&#127942;</div>
       <h3>Quality gate badge</h3>
       <p>Every run mints a CI-style badge with copy-paste README markdown. Green means every behavior test passed on the recommended model.</p></div>
@@ -335,7 +335,7 @@ footer b{color:var(--brand);font-weight:600}
 <section class="final"><div class="wrap">
   <img class="badgeimg rv" src="/api/badge.svg?label=AgentBench&passed=5&total=5" alt="AgentBench quality badge">
   <h2 class="rv">Your users are already testing it.<br>Beat them to it.</h2>
-  <p class="sec-sub rv" style="margin:0 auto 32px">No signup. Six preloaded suites. A full run costs about half a cent.</p>
+  <p class="sec-sub rv" style="margin:0 auto 32px">No signup. Fifteen preloaded suites. A full run costs about half a cent.</p>
   <a class="cta big rv" href="/app">Run a benchmark now</a>
 </div></section>
 

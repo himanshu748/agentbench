@@ -246,11 +246,11 @@ class TestStreaming:
         real = runner._run_one
         calls = {"n": 0}
 
-        async def flaky(sem, prompt, test, model):
+        async def flaky(sem, prompt, test, model, attempt=0):
             calls["n"] += 1
             if calls["n"] % 3 == 0:
                 raise RuntimeError("worker exploded")
-            return await real(sem, prompt, test, model)
+            return await real(sem, prompt, test, model, attempt)
 
         monkeypatch.setattr(runner, "_run_one", flaky)
         with client.stream("GET", "/api/runs/stream",
@@ -362,3 +362,63 @@ class TestBadge:
 
     def test_empty_label_falls_back_to_brand(self, client):
         assert "AgentBench" in client.get("/api/badge.svg", params={"label": "  "}).text
+
+
+class TestEstimate:
+    def test_estimate_returns_cost_and_cells(self, client):
+        r = client.post("/api/estimate", json={"suite_id": "customer-support",
+                                               "models": ["openai/gpt-4o-mini"], "repeat": 1})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["cells"] == 8
+        assert body["calls"] == 16  # model + judge per cell
+        assert body["est_cost_usd"] > 0
+
+    def test_estimate_scales_with_repeat(self, client):
+        one = client.post("/api/estimate", json={"suite_id": "customer-support",
+                                                 "models": ["auto"], "repeat": 1}).json()
+        three = client.post("/api/estimate", json={"suite_id": "customer-support",
+                                                   "models": ["auto"], "repeat": 3}).json()
+        assert three["cells"] == one["cells"] * 3
+        assert three["est_cost_usd"] == pytest.approx(one["est_cost_usd"] * 3, rel=1e-6)
+
+    def test_estimate_rejects_unknown_suite(self, client):
+        assert client.post("/api/estimate",
+                           json={"suite_id": "nope", "models": ["auto"]}).status_code == 404
+
+    def test_estimate_spends_nothing(self, client):
+        """A pre-flight estimate must never create a run or touch the cache."""
+        from backend import runner
+        before = len(runner.RUNS)
+        client.post("/api/estimate", json={"suite_id": "customer-support", "models": ["auto"]})
+        assert len(runner.RUNS) == before
+
+
+class TestRepeat:
+    def test_repeat_produces_flakiness_and_aggregated_cells(self, client):
+        r = client.post("/api/runs", json={"suite_id": "brand-voice", "models": ["auto"],
+                                           "sync": True, "repeat": 3})
+        run = r.json()
+        assert run["repeat"] == 3
+        assert len(run["results"]) == 5  # aggregated, not 15
+        assert run["flakiness"]["measured"] is True
+        assert all(c["runs"] == 3 for c in run["results"])
+
+    def test_repeat_counts_toward_the_cell_ceiling(self, client, monkeypatch):
+        monkeypatch.setattr(main, "MAX_CELLS_PER_RUN", 10)
+        # brand-voice has 5 tests; x1 model x3 repeat = 15 > 10.
+        r = client.post("/api/runs", json={"suite_id": "brand-voice", "models": ["auto"],
+                                           "sync": True, "repeat": 3})
+        assert r.status_code == 400
+        assert "too large" in r.json()["detail"]
+
+    def test_repeat_over_max_is_rejected(self, client):
+        r = client.post("/api/runs", json={"suite_id": "brand-voice", "models": ["auto"],
+                                           "sync": True, "repeat": main.MAX_REPEAT + 1})
+        assert r.status_code == 400
+        assert "repeat" in r.json()["detail"]
+
+    def test_repeat_zero_is_rejected(self, client):
+        r = client.post("/api/runs", json={"suite_id": "brand-voice", "models": ["auto"],
+                                           "sync": True, "repeat": 0})
+        assert r.status_code == 400

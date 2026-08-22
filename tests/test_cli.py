@@ -283,3 +283,208 @@ class TestColor:
         monkeypatch.delenv("FORCE_COLOR", raising=False)
         monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
         assert cli._supports_color(io.StringIO()) is False
+
+
+class TestFlakinessOutput:
+    def make_flaky_run(self):
+        run = make_run(passed_per_model={"m1": (2, 3)})
+        run["repeat"] = 5
+        run["results"][0].update({"runs": 5, "passes": 5, "pass_rate": 1.0, "flaky": False})
+        run["results"][1].update({"runs": 5, "passes": 2, "pass_rate": 0.4, "flaky": True})
+        run["results"][2].update({"runs": 5, "passes": 0, "pass_rate": 0.0, "flaky": False})
+        run["flakiness"] = {"measured": True, "repeat": 5, "flaky_count": 1,
+                            "total_cells": 3, "consistency": 0.6667,
+                            "flaky_cells": [{"input": "i1", "category": "conciseness",
+                                             "model": "m1", "passes": 2, "runs": 5,
+                                             "pass_rate": 0.4}]}
+        return run
+
+    def test_flaky_cells_are_shown(self, monkeypatch, fake_api, capsys):
+        fake_api({"/api/runs": self.make_flaky_run()})
+        run_cli(["run", "s", "--models", "m1", "--repeat", "5", "--min-pass-rate", "0"],
+                monkeypatch)
+        out = capsys.readouterr().out
+        assert "FLAKY" in out
+        assert "Flakiness" in out and "1/3" in out
+
+    def test_fail_on_flaky_blocks(self, monkeypatch, fake_api):
+        fake_api({"/api/runs": self.make_flaky_run()})
+        code = run_cli(["run", "s", "--models", "m1", "--repeat", "5",
+                        "--min-pass-rate", "0", "--fail-on-flaky"], monkeypatch)
+        assert code == cli.EXIT_TESTS_FAILED
+
+    def test_fail_on_flaky_requires_repeat(self, monkeypatch, fake_api):
+        fake_api({})
+        assert run_cli(["run", "s", "--models", "m1", "--fail-on-flaky"], monkeypatch) == 2
+
+    def test_repeat_below_one_is_rejected(self, monkeypatch, fake_api):
+        fake_api({})
+        assert run_cli(["run", "s", "--models", "m1", "--repeat", "0"], monkeypatch) == 2
+
+
+class TestJUnit:
+    def test_junit_is_well_formed(self, monkeypatch, fake_api, tmp_path):
+        import xml.dom.minidom as minidom
+        out = tmp_path / "j.xml"
+        fake_api({"/api/runs": make_run(passed_per_model={"m1": (1, 2)})})
+        run_cli(["run", "s", "--models", "m1", "--min-pass-rate", "0",
+                 "--junit", str(out)], monkeypatch)
+        doc = minidom.parse(str(out))  # raises if malformed
+        ts = doc.getElementsByTagName("testsuite")[0]
+        assert ts.getAttribute("tests") == "2"
+        assert ts.getAttribute("failures") == "1"
+        assert len(doc.getElementsByTagName("testcase")) == 2
+
+    def test_junit_escapes_reasons(self, monkeypatch, fake_api, tmp_path):
+        out = tmp_path / "j.xml"
+        run = make_run(passed_per_model={"m1": (0, 1)})
+        run["results"][0]["reason"] = 'broke <tag> & "quote"'
+        fake_api({"/api/runs": run})
+        run_cli(["run", "s", "--models", "m1", "--min-pass-rate", "0",
+                 "--junit", str(out)], monkeypatch)
+        import xml.dom.minidom as minidom
+        minidom.parse(str(out))  # must still parse
+        raw = out.read_text()
+        assert "<tag>" not in raw and "&lt;tag&gt;" in raw
+
+    def test_junit_marks_flaky_as_skipped(self, monkeypatch, fake_api, tmp_path):
+        out = tmp_path / "j.xml"
+        run = make_run(passed_per_model={"m1": (1, 1)})
+        run["repeat"] = 3
+        run["results"][0].update({"runs": 3, "passes": 2, "flaky": True})
+        fake_api({"/api/runs": run})
+        run_cli(["run", "s", "--models", "m1", "--repeat", "3", "--min-pass-rate", "0",
+                 "--junit", str(out)], monkeypatch)
+        assert "skipped" in out.read_text()
+
+
+class TestBaseline:
+    def test_output_writes_a_report(self, monkeypatch, fake_api, tmp_path):
+        out = tmp_path / "r.json"
+        fake_api({"/api/runs": make_run()})
+        run_cli(["run", "s", "--models", "m1", "--output", str(out)], monkeypatch)
+        assert json.loads(out.read_text())["run_id"] == "abc123"
+
+    def _baseline_and_run(self, tmp_path):
+        # Baseline: both cells passed. Current run: one now fails => 1 regression.
+        base = make_run(passed_per_model={"m1": (2, 2)})
+        path = tmp_path / "base.json"
+        path.write_text(json.dumps(base))
+        current = make_run(passed_per_model={"m1": (1, 2)})
+        # align cell keys (model, category, input) with the baseline's
+        for cur, b in zip(current["results"], base["results"]):
+            cur["input"], cur["category"], cur["model"] = b["input"], b["category"], b["model"]
+        return path, current
+
+    def test_regression_is_reported(self, monkeypatch, fake_api, tmp_path, capsys):
+        path, current = self._baseline_and_run(tmp_path)
+        fake_api({"/api/runs": current})
+        run_cli(["run", "s", "--models", "m1", "--min-pass-rate", "0",
+                 "--baseline", str(path)], monkeypatch)
+        out = capsys.readouterr().out
+        assert "regression" in out.lower()
+        assert "vs baseline" in out
+
+    def test_fail_on_regression_blocks_even_under_threshold(self, monkeypatch, fake_api, tmp_path):
+        path, current = self._baseline_and_run(tmp_path)
+        fake_api({"/api/runs": current})
+        # min-pass-rate 0 would pass on its own; the regression must still block.
+        code = run_cli(["run", "s", "--models", "m1", "--min-pass-rate", "0",
+                        "--baseline", str(path), "--fail-on-regression"], monkeypatch)
+        assert code == cli.EXIT_TESTS_FAILED
+
+    def test_missing_baseline_file_is_a_clear_error(self, monkeypatch, fake_api):
+        fake_api({"/api/runs": make_run()})
+        code = run_cli(["run", "s", "--models", "m1", "--baseline", "/no/such.json"],
+                       monkeypatch)
+        assert code == cli.EXIT_ERROR
+
+    def test_no_changes_reports_stable(self, monkeypatch, fake_api, tmp_path, capsys):
+        base = make_run(passed_per_model={"m1": (2, 2)})
+        path = tmp_path / "b.json"
+        path.write_text(json.dumps(base))
+        current = make_run(passed_per_model={"m1": (2, 2)})
+        for cur, b in zip(current["results"], base["results"]):
+            cur["input"], cur["category"], cur["model"] = b["input"], b["category"], b["model"]
+        fake_api({"/api/runs": current})
+        run_cli(["run", "s", "--models", "m1", "--baseline", str(path)], monkeypatch)
+        assert "no per-cell changes" in capsys.readouterr().out
+
+
+class TestRegressionDiff:
+    def test_detects_regressions_and_fixes(self):
+        base = {"results": [
+            {"model": "m", "category": "a", "input": "1", "pass": True},
+            {"model": "m", "category": "b", "input": "2", "pass": False},
+        ]}
+        cur = {"results": [
+            {"model": "m", "category": "a", "input": "1", "pass": False},  # regressed
+            {"model": "m", "category": "b", "input": "2", "pass": True},   # fixed
+        ]}
+        diff = cli.regression_diff(cur, base)
+        assert len(diff["regressions"]) == 1 and diff["regressions"][0]["category"] == "a"
+        assert len(diff["fixes"]) == 1 and diff["fixes"][0]["category"] == "b"
+
+    def test_new_cells_are_counted_not_flagged(self):
+        base = {"results": [{"model": "m", "category": "a", "input": "1", "pass": True}]}
+        cur = {"results": [
+            {"model": "m", "category": "a", "input": "1", "pass": True},
+            {"model": "m", "category": "new", "input": "9", "pass": False},
+        ]}
+        diff = cli.regression_diff(cur, base)
+        assert diff["regressions"] == []
+        assert diff["new_cells"] == 1
+
+    def test_pass_rate_delta(self):
+        base = {"results": [{"model": "m", "category": "a", "input": "1", "pass": True},
+                            {"model": "m", "category": "b", "input": "2", "pass": True}]}
+        cur = {"results": [{"model": "m", "category": "a", "input": "1", "pass": True},
+                           {"model": "m", "category": "b", "input": "2", "pass": False}]}
+        diff = cli.regression_diff(cur, base)
+        assert diff["baseline_pass_rate"] == 1.0
+        assert diff["current_pass_rate"] == 0.5
+
+
+class TestEstimateAndValidate:
+    def test_estimate_prints_cost(self, monkeypatch, fake_api, capsys):
+        fake_api({"/api/estimate": {"suite_id": "s", "num_tests": 8, "models": ["auto"],
+                                    "repeat": 2, "cells": 16, "calls": 32,
+                                    "per_model": [{"model": "auto", "est_cost_usd": 0.05}],
+                                    "est_cost_usd": 0.05, "note": "static"}})
+        assert run_cli(["estimate", "customer-support", "--models", "auto", "--repeat", "2"],
+                       monkeypatch) == cli.EXIT_OK
+        out = capsys.readouterr().out
+        assert "16 cells" in out and "$0.05" in out
+
+    def test_estimate_json(self, monkeypatch, fake_api, capsys):
+        fake_api({"/api/estimate": {"cells": 8, "est_cost_usd": 0.01, "per_model": [],
+                                    "num_tests": 8, "models": ["auto"], "repeat": 1,
+                                    "calls": 16, "note": "x"}})
+        run_cli(["estimate", "customer-support", "--models", "auto", "--json"], monkeypatch)
+        assert json.loads(capsys.readouterr().out)["cells"] == 8
+
+    def test_validate_accepts_a_good_suite(self, monkeypatch, fake_api, tmp_path, capsys):
+        path = tmp_path / "s.yaml"
+        path.write_text("name: x\nsystem_prompt: p\ntests:\n  - input: a\n    category: conciseness\n")
+        fake_api({"/api/suites": {"suite_id": "custom-1"},
+                  "/api/suites/custom-1": {"tests": [{"input": "a", "category": "conciseness"}]}})
+        assert run_cli(["validate", str(path)], monkeypatch) == cli.EXIT_OK
+        assert "valid" in capsys.readouterr().out
+
+    def test_validate_rejects_a_bad_suite(self, monkeypatch, fake_api, tmp_path, capsys):
+        path = tmp_path / "s.yaml"
+        path.write_text("tests: []\n")
+        fake_api({"/api/suites": cli.ApiError("invalid suite: missing system_prompt")})
+        code = run_cli(["validate", str(path)], monkeypatch)
+        assert code == cli.EXIT_TESTS_FAILED
+        assert "invalid" in capsys.readouterr().err
+
+    def test_validate_missing_file(self, monkeypatch, fake_api):
+        fake_api({})
+        assert run_cli(["validate", "/no/such.yaml"], monkeypatch) == cli.EXIT_ERROR
+
+    def test_categories_lists_them(self, monkeypatch, fake_api, capsys):
+        fake_api({"/api/meta": {"categories": ["conciseness", "pii_refusal"]}})
+        run_cli(["categories"], monkeypatch)
+        out = capsys.readouterr().out
+        assert "conciseness" in out and "custom" in out

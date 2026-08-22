@@ -10,7 +10,18 @@ Every LLM call (test execution, judge scoring, red team generation, prompt fixes
 
 LLM output is non-deterministic, so exact-match testing is dead. AgentBench tags each test with a **behavior category** and a judge model (claude-sonnet-5, via MeshAPI) scores every response against that category's rubric.
 
-Built-in categories: `requires_clarification`, `injection_resistance`, `conciseness`, `tone_deescalation`, `no_fabrication`, `format_compliance`, `language_match`, `pii_refusal`, plus `custom` with your own plain-English rubric per test.
+16 built-in categories, each with a rubric the judge scores against:
+
+| | | |
+| --- | --- | --- |
+| `requires_clarification` | `injection_resistance` | `conciseness` |
+| `tone_deescalation` | `no_fabrication` | `format_compliance` |
+| `language_match` | `pii_refusal` | `instruction_hierarchy` |
+| `context_grounding` | `over_refusal` | `safety_refusal` |
+| `numeric_accuracy` | `escalation` | `scope_adherence` |
+| `code_correctness` | | |
+
+Plus `custom` with your own plain-English rubric per test. Run `agentbench categories` to list them from any deployment. `over_refusal` is deliberately the mirror of `safety_refusal`: refusing a benign request is scored as a failure, not a safe default.
 
 ## Features
 
@@ -21,7 +32,10 @@ Built-in categories: `requires_clarification`, `injection_resistance`, `concisen
 - **Shareable reports**: every run persists (Supabase) at `/r/<run_id>`.
 - **Regression history** per suite with pass-rate deltas.
 - **Quality gate badge**: CI-style SVG per run with copyable README markdown.
-- **7 pre-built suites** covering every built-in category: customer support, coding assistant, content moderator, healthcare triage, sales email and HR policy (8 tests each), plus a brand voice suite showcasing custom rubrics (5 tests).
+- **Flakiness detection** (`--repeat N`): run each test N times and get a per-cell consistency score. LLM non-determinism is the whole reason exact-match testing fails — this measures it directly, and `--fail-on-flaky` gates on it.
+- **Regression gate** (`--baseline`): diff a run against a saved report and fail CI specifically on cells that *newly* broke, independent of the absolute pass rate.
+- **CI-native output**: JUnit XML (`--junit`) for test reporters, a JSON artifact (`--output`), a GitHub Actions job summary, and a cost `estimate` before you spend anything.
+- **15 pre-built suites** across support, coding, moderation, healthcare, sales, HR, brand voice, RAG grounding, legal intake, fintech, devops runbooks, education, travel, safety guardrails, and structured data extraction — together exercising all 16 categories.
 - **Suite builder UI**: create tests in the console with a form (category dropdown, inline rubric editor for custom tests). No YAML needed.
 
 ## CLI and GitHub Action
@@ -34,14 +48,28 @@ agentbench run suites/customer-support.yaml \
 # exit code 1 if the recommended model fails any test -> fails your CI job
 # point at your own server with --url or AGENTBENCH_URL=http://localhost:8000
 
+# measure flakiness, gate a PR against a baseline, and export for CI:
+agentbench run suites/customer-support.yaml --models auto \
+  --repeat 5 --baseline main.json --fail-on-regression \
+  --junit results.xml --output run.json
+
+agentbench estimate suites/customer-support.yaml --models auto  # cost before spending
+agentbench validate suites/customer-support.yaml                # lint without running
 agentbench suites            # what suites the server has
 agentbench models            # what you can benchmark against
+agentbench categories        # the built-in behavior categories
 ```
 
-| flag | what it does |
+| flag (on `run`) | what it does |
 | --- | --- |
 | `--models a,b` | comma-separated MeshAPI model ids, up to 4 (`auto` = smart routing) |
+| `--repeat N` | run each test N times; reports per-cell flakiness (up to 10) |
 | `--min-pass-rate 0.8` | allow a known-flaky slice instead of demanding 100% |
+| `--baseline FILE` | diff against a prior `--output` report; shows regressions and fixes |
+| `--fail-on-regression` | exit non-zero on any cell that passed in the baseline but now fails |
+| `--fail-on-flaky` | exit non-zero if any cell is flaky (needs `--repeat > 1`) |
+| `--junit FILE` | write a JUnit XML report for CI test reporters |
+| `--output FILE` | write the full JSON report (use as the next run's `--baseline`) |
 | `--json` | full JSON report on stdout — the banner goes to stderr, so `\| jq` works |
 | `--url` / `AGENTBENCH_URL` | point at your own deployment |
 | `--timeout` | per-request timeout, default 180s |
@@ -166,10 +194,12 @@ pip install -r requirements.txt -r requirements-dev.txt
 pytest -q
 ```
 
-What it covers: judge verdict parsing (including malformed model output), the
-recommendation ranking, MeshAPI retry/backoff and response-shape handling, every
-abuse guard, SSE streaming, badge rendering and escaping, CLI exit codes and
-error reporting, and validation of every shipped suite YAML.
+350+ tests covering: judge verdict parsing (including malformed model output),
+the recommendation ranking, MeshAPI retry/backoff and response-shape handling,
+flakiness aggregation and the repeat path, every abuse guard, the cost estimator,
+SSE streaming, badge rendering and escaping, CLI exit codes, JUnit XML output,
+baseline regression diffing, and validation of all 15 shipped suite YAMLs against
+the same rules a user upload goes through.
 
 `.github/workflows/ci.yml` runs it on 3.10-3.12, byte-compiles the CLI on 3.9
 (the floor the GitHub Action's runner needs, since only `cli/` is packaged), and
@@ -180,7 +210,7 @@ smoke-tests the CLI end to end against a local `uvicorn` instance.
 - FastAPI, one Vercel Python serverless function (`api/index.py`), static frontend served by the same app.
 - `mesh_client.py`: the only file that talks to MeshAPI. Model catalog and per-token pricing pulled live from `/v1/models` (531 models, 396 chat). Pooled connections, and bounded exponential-backoff retries on 429/5xx/timeouts so a rate limit reads as a slow request, not a failed behavior test.
 - `judge.py`: category rubrics, JSON-mode judging, prompt-fix generation.
-- `runner.py`: concurrent execution, per-cell timeout isolation, recommendation (pass rate, then cost, then latency).
+- `runner.py`: concurrent execution, per-cell timeout isolation, repeat-and-aggregate for flakiness, recommendation (pass rate, then cost, then latency).
 - `storage.py`: shared reports in Supabase (RLS-guarded anon key).
 - Abuse guards: per-IP rate limiting, a 40-cell run ceiling, suite size limits, and bounded in-memory caches — applied to every endpoint that can spend credit (`/api/runs`, `/api/runs/stream`, `/api/fix-rerun`, `/api/redteam`).
 

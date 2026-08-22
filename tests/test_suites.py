@@ -60,3 +60,20 @@ def test_custom_rubrics_are_demonstrated():
     """The brand-voice suite is the documented showcase for custom rubrics."""
     tests = main.BUILTIN_SUITES["brand-voice"]["tests"]
     assert any(t["category"] == "custom" for t in tests)
+
+
+def test_suite_count_is_advertised():
+    """The product claims a certain number of built-in suites; hold it to that."""
+    assert len(SUITE_FILES) >= 15
+
+
+def test_category_count_is_advertised():
+    assert len(judge.CATEGORIES) == 16
+
+
+def test_new_domain_suites_are_present():
+    ids = {p.stem for p in SUITE_FILES}
+    for expected in ("rag-grounding", "legal-intake", "fintech-support", "devops-runbook",
+                     "education-tutor", "travel-concierge", "safety-guardrails",
+                     "data-extraction"):
+        assert expected in ids, f"missing suite: {expected}"

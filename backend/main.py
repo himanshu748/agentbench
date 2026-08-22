@@ -23,6 +23,7 @@ MAX_INPUT_CHARS = 8_000         # per test input
 MAX_PROMPT_CHARS = 20_000       # per system prompt / rubric
 MAX_YAML_CHARS = 200_000        # uploaded suite document
 MAX_USER_SUITES = 500           # bounded LRU: user-created suites live in memory
+MAX_REPEAT = 10                 # repeats per cell (flakiness detection)
 RATE_LIMIT = 8                  # runs per window per IP (per warm instance)
 RATE_WINDOW = 600               # seconds
 _ip_hits: dict[str, list] = {}
@@ -125,6 +126,13 @@ class RunIn(BaseModel):
     models: list[str]
     sync: bool = True
     system_prompt: str | None = None  # override, used by fix-and-rerun
+    repeat: int = 1                   # run each cell N times to measure flakiness
+
+
+class EstimateIn(BaseModel):
+    suite_id: str
+    models: list[str]
+    repeat: int = 1
 
 
 class RedTeamIn(BaseModel):
@@ -233,7 +241,7 @@ def create_suite(body: SuiteIn):
     return {"suite_id": suite_id}
 
 
-def _validate_run(suite_id: str, model_list: list) -> tuple:
+def _validate_run(suite_id: str, model_list: list, repeat: int = 1) -> tuple:
     if suite_id not in SUITES:
         raise HTTPException(404, "suite not found")
     # De-duplicate while preserving order: repeating a model in the request
@@ -251,23 +259,59 @@ def _validate_run(suite_id: str, model_list: list) -> tuple:
         if unknown:
             detail += f" (unknown: {', '.join(sorted(set(unknown))[:4])})"
         raise HTTPException(400, detail)
+    if not (1 <= repeat <= MAX_REPEAT):
+        raise HTTPException(400, f"repeat must be between 1 and {MAX_REPEAT}")
     suite = SUITES[suite_id]
-    if len(suite["tests"]) * len(models) > MAX_CELLS_PER_RUN:
-        raise HTTPException(400, f"run too large: max {MAX_CELLS_PER_RUN} cells per run")
+    # Every repeat is a real MeshAPI call, so it counts toward the cell ceiling.
+    if len(suite["tests"]) * len(models) * repeat > MAX_CELLS_PER_RUN:
+        raise HTTPException(400, f"run too large: max {MAX_CELLS_PER_RUN} cells per run "
+                                 f"(tests x models x repeat)")
     return suite, models
 
 
 @app.post("/api/runs")
 async def create_run(body: RunIn, request: Request):
     _check_rate(request)
-    suite, models = _validate_run(body.suite_id, body.models)
+    suite, models = _validate_run(body.suite_id, body.models, body.repeat)
     if body.system_prompt:
         suite = {**suite, "system_prompt": body.system_prompt}
     if body.sync:
-        run = await runner.run_sync(suite, models)
+        run = await runner.run_sync(suite, models, body.repeat)
         await storage.save_run(run)
         return run
-    return {"run_id": runner.start_run(suite, models)}
+    return {"run_id": runner.start_run(suite, models, body.repeat)}
+
+
+@app.post("/api/estimate")
+def estimate(body: EstimateIn):
+    """Predict a run's cost/size before spending anything on it.
+
+    Each cell is one model call plus one judge call, run `repeat` times. This is
+    a static estimate from the catalog's per-token pricing and a rough token
+    budget — useful for CI ("will this run blow my ceiling?") without touching
+    MeshAPI."""
+    suite, models = _validate_run(body.suite_id, body.models, body.repeat)
+    tests = suite["tests"]
+    prompt_chars = len(suite.get("system_prompt", ""))
+    per_model = []
+    for m in models:
+        model_cost = 0.0
+        for t in tests:
+            # ~4 chars/token; assume a modest 220-token answer and a judge pass.
+            in_tok = (prompt_chars + len(t.get("input", "")) + len(t.get("rubric", ""))) // 4
+            out_tok = 220
+            call = mesh_client._estimate_cost(m, in_tok, out_tok)
+            judge = mesh_client._estimate_cost(
+                mesh_client.DEFAULT_JUDGE_MODEL, in_tok + out_tok + 200, 60)
+            model_cost += (call + judge) * body.repeat
+        per_model.append({"model": m, "est_cost_usd": round(model_cost, 6)})
+    cells = len(tests) * len(models) * body.repeat
+    return {"suite_id": body.suite_id, "num_tests": len(tests), "models": models,
+            "repeat": body.repeat, "cells": cells,
+            "calls": cells * 2,  # model + judge per cell
+            "per_model": per_model,
+            "est_cost_usd": round(sum(p["est_cost_usd"] for p in per_model), 6),
+            "note": "static estimate from catalog pricing; actual usage varies"}
 
 
 def _sse(event: str, payload: dict) -> str:

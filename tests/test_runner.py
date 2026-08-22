@@ -37,7 +37,7 @@ class TestRecommend:
         s = runner._recommend([cell("a", True), cell("a", False)], ["a"])
         stat = s["per_model"][0]
         assert stat == {"model": "a", "passed": 1, "total": 2, "pass_rate": 0.5,
-                        "total_cost_usd": 0.002, "avg_latency_ms": 100}
+                        "flaky": 0, "total_cost_usd": 0.002, "avg_latency_ms": 100}
 
     def test_model_with_no_results_does_not_crash(self):
         s = runner._recommend([], ["ghost"])
@@ -116,11 +116,11 @@ class TestExecuteRun:
         calls = {"n": 0}
         real = runner._run_one
 
-        async def flaky(sem, prompt, test, model):
+        async def flaky(sem, prompt, test, model, attempt=0):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise RuntimeError("cell exploded")
-            return await real(sem, prompt, test, model)
+            return await real(sem, prompt, test, model, attempt)
 
         monkeypatch.setattr(runner, "_run_one", flaky)
         run = await runner.run_sync(make_suite(3), ["openai/gpt-4o-mini"])

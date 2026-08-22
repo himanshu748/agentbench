@@ -100,31 +100,85 @@ def resolve_suite(base: str, suite_arg: str, timeout: float) -> str:
 def print_table(run: dict):
     results = run.get("results") or []
     width = max((len(r["category"]) for r in results), default=8) + 2
+    repeated = (run.get("repeat") or 1) > 1
     for m in run.get("models", []):
         rows = [x for x in results if x["model"] == m]
         print(f"\n{BOLD}{m}{END}")
         for r in rows:
-            mark = (f"{GREEN}PASS{END}" if r["pass"] else
-                    f"{YELLOW}ERR {END}" if r.get("status") == "error" else f"{RED}FAIL{END}")
-            print(f"  {mark}  {r['category']:<{width}} {DIM}{r['latency_ms']}ms  "
-                  f"${r['cost_usd']:.5f}  {(r.get('reason') or '')[:70]}{END}")
+            if r.get("flaky"):
+                mark = f"{YELLOW}FLAKY{END}"
+            elif r["pass"]:
+                mark = f"{GREEN}PASS {END}"
+            elif r.get("status") == "error":
+                mark = f"{YELLOW}ERR  {END}"
+            else:
+                mark = f"{RED}FAIL {END}"
+            rate = ""
+            if repeated:
+                rate = f"{DIM}{r.get('passes', 0)}/{r.get('runs', 1)}{END} "
+            print(f"  {mark} {rate} {r['category']:<{width}} {DIM}{r['latency_ms']}ms  "
+                  f"${r['cost_usd']:.5f}  {(r.get('reason') or '')[:64]}{END}")
 
 
-def write_step_summary(run: dict, best: dict, ok: bool):
+def print_flakiness(run: dict):
+    fk = run.get("flakiness") or {}
+    if not fk.get("measured"):
+        return
+    n, total = fk["flaky_count"], fk.get("total_cells", 0)
+    color = GREEN if n == 0 else YELLOW
+    print(f"\n{BOLD}Flakiness{END} {DIM}(each cell x{fk['repeat']}){END}: "
+          f"{color}{n}/{total} cells flaky{END}  "
+          f"{DIM}consistency {fk['consistency']:.0%}{END}")
+    for c in fk.get("flaky_cells", [])[:8]:
+        print(f"  {YELLOW}~{END} {c['category']:<22} {DIM}{c['passes']}/{c['runs']} "
+              f"passed · {c['model']}{END}")
+
+
+def print_regression(diff: dict):
+    reg, fixes = diff["regressions"], diff["fixes"]
+    delta = diff["current_pass_rate"] - diff["baseline_pass_rate"]
+    arrow = f"{GREEN}+{delta:.0%}{END}" if delta >= 0 else f"{RED}{delta:.0%}{END}"
+    print(f"\n{BOLD}vs baseline{END} {DIM}{diff['baseline_pass_rate']:.0%} -> "
+          f"{diff['current_pass_rate']:.0%}{END} ({arrow})")
+    if reg:
+        print(f"  {RED}{len(reg)} regression(s):{END}")
+        for r in reg[:8]:
+            print(f"    {RED}-{END} {r['category']:<22} {DIM}{r['model']}{END}")
+    if fixes:
+        print(f"  {GREEN}{len(fixes)} fix(es):{END}")
+        for r in fixes[:8]:
+            print(f"    {GREEN}+{END} {r['category']:<22} {DIM}{r['model']}{END}")
+    if not reg and not fixes:
+        print(f"  {DIM}no per-cell changes{END}")
+
+
+def write_step_summary(run: dict, best: dict, ok: bool, diff: dict = None):
     """Render a markdown report into the GitHub Actions job summary, if present."""
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if not target:
         return
     s = run["summary"]
+    repeated = (run.get("repeat") or 1) > 1
     lines = [f"## AgentBench — {run.get('suite_name') or 'suite'}", "",
              ("✅ **Passed**" if ok else "❌ **Failed**")
              + f" — recommended model `{s['recommended']}` "
-               f"scored {best['passed']}/{best['total']}", "",
-             "| model | passed | cost | avg latency |",
-             "| --- | --- | --- | --- |"]
+               f"scored {best['passed']}/{best['total']}", ""]
+    header = "| model | passed | " + ("flaky | " if repeated else "") + "cost | avg latency |"
+    sep = "| --- | --- | " + ("--- | " if repeated else "") + "--- | --- |"
+    lines += [header, sep]
     for p in s["per_model"]:
-        lines.append(f"| `{p['model']}` | {p['passed']}/{p['total']} | "
+        flaky = f"{p.get('flaky', 0)} | " if repeated else ""
+        lines.append(f"| `{p['model']}` | {p['passed']}/{p['total']} | {flaky}"
                      f"${p['total_cost_usd']:.4f} | {p['avg_latency_ms']}ms |")
+    if diff:
+        lines += ["", f"**vs baseline:** {diff['baseline_pass_rate']:.0%} → "
+                  f"{diff['current_pass_rate']:.0%} · "
+                  f"{len(diff['regressions'])} regression(s), {len(diff['fixes'])} fix(es)"]
+    fk = run.get("flakiness") or {}
+    if fk.get("measured"):
+        lines += ["", f"**Flakiness:** {fk['flaky_count']}/{fk.get('total_cells', 0)} "
+                  f"cells flaky across {fk['repeat']} runs "
+                  f"(consistency {fk['consistency']:.0%})"]
     failures = [r for r in run.get("results") or [] if not r["pass"]]
     if failures:
         lines += ["", "<details><summary>Failing tests</summary>", ""]
@@ -140,16 +194,96 @@ def write_step_summary(run: dict, best: dict, ok: bool):
         pass  # a summary that cannot be written must never fail the build
 
 
+def _xml_escape(text: str) -> str:
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def write_junit(run: dict, path: str):
+    """Emit a JUnit XML report so CI systems render per-test pass/fail natively.
+
+    One <testcase> per result cell; a failing cell carries a <failure>, an
+    errored cell an <error>, and a flaky cell is marked skipped-with-note so it
+    shows up without hard-failing a suite that only gates on pass rate."""
+    results = run.get("results") or []
+    failures = sum(1 for r in results if not r["pass"] and r.get("status") != "error")
+    errors = sum(1 for r in results if r.get("status") == "error")
+    skipped = sum(1 for r in results if r.get("flaky"))
+    total_time = sum(r.get("latency_ms", 0) for r in results) / 1000.0
+    name = run.get("suite_name") or "AgentBench"
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+             f'<testsuite name="{_xml_escape(name)}" tests="{len(results)}" '
+             f'failures="{failures}" errors="{errors}" skipped="{skipped}" '
+             f'time="{total_time:.3f}">']
+    for r in results:
+        case = (f'{r["category"]} [{r["model"]}]')
+        classname = _xml_escape(name)
+        t = r.get("latency_ms", 0) / 1000.0
+        reason = _xml_escape((r.get("reason") or "")[:500])
+        lines.append(f'  <testcase classname="{classname}" name="{_xml_escape(case)}" '
+                     f'time="{t:.3f}">')
+        if r.get("status") == "error":
+            lines.append(f'    <error message="{reason}"></error>')
+        elif not r["pass"]:
+            lines.append(f'    <failure message="{reason}"></failure>')
+        elif r.get("flaky"):
+            lines.append(f'    <skipped message="flaky: '
+                         f'{r.get("passes",0)}/{r.get("runs",1)} passed"></skipped>')
+        lines.append('  </testcase>')
+    lines.append('</testsuite>')
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def _cell_key(r: dict) -> tuple:
+    return (r.get("model"), r.get("category"), r.get("input"))
+
+
+def regression_diff(run: dict, baseline: dict) -> dict:
+    """Compare a run against a saved baseline report, per cell.
+
+    Returns the cells that newly fail (regressions), newly pass (fixes) and the
+    pass-rate delta per model. This is what makes the tool a real CI gate: it can
+    fail a PR specifically because a test that used to pass now doesn't."""
+    base_by_key = {_cell_key(r): r for r in baseline.get("results") or []}
+    regressions, fixes = [], []
+    for r in run.get("results") or []:
+        prev = base_by_key.get(_cell_key(r))
+        if prev is None:
+            continue
+        if prev["pass"] and not r["pass"]:
+            regressions.append(r)
+        elif not prev["pass"] and r["pass"]:
+            fixes.append(r)
+    def rate(report):
+        rs = report.get("results") or []
+        return sum(1 for r in rs if r["pass"]) / len(rs) if rs else 0.0
+    return {"regressions": regressions, "fixes": fixes,
+            "baseline_pass_rate": round(rate(baseline), 4),
+            "current_pass_rate": round(rate(run), 4),
+            "new_cells": sum(1 for r in run.get("results") or []
+                             if _cell_key(r) not in base_by_key)}
+
+
 def cmd_run(args, base: str) -> int:
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     if not models:
         raise ApiError("--models must list at least one model id")
 
+    baseline = None
+    if args.baseline:
+        try:
+            baseline = json.loads(pathlib.Path(args.baseline).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            raise ApiError(f"could not read baseline {args.baseline}: {e}") from None
+
     suite_id = resolve_suite(base, args.suite, args.timeout)
     # Banner goes to stderr so `--json` output stays pipeable into jq.
-    print(f"{DIM}agentbench · {base} · {len(models)} model(s){END}", file=sys.stderr)
+    extra = f" · x{args.repeat}" if args.repeat > 1 else ""
+    print(f"{DIM}agentbench · {base} · {len(models)} model(s){extra}{END}", file=sys.stderr)
     run = api(base, "/api/runs",
-              {"suite_id": suite_id, "models": models, "sync": True}, args.timeout)
+              {"suite_id": suite_id, "models": models, "sync": True,
+               "repeat": args.repeat}, args.timeout)
 
     if run.get("status") == "error":
         raise ApiError(f"run failed on the server: {run.get('error', 'unknown error')}")
@@ -161,10 +295,30 @@ def cmd_run(args, base: str) -> int:
         print(json.dumps(run, indent=2))
     else:
         print_table(run)
+        print_flakiness(run)
 
     best = next(p for p in summary["per_model"] if p["model"] == summary["recommended"])
     rate = best["passed"] / best["total"] if best["total"] else 0.0
     ok = rate >= args.min_pass_rate
+
+    diff = None
+    if baseline:
+        diff = regression_diff(run, baseline)
+        if not args.json:
+            print_regression(diff)
+        if args.fail_on_regression and diff["regressions"]:
+            ok = False
+
+    if args.fail_on_flaky and (run.get("flakiness") or {}).get("flaky_count"):
+        ok = False
+
+    # Side-effect outputs happen regardless of pass/fail so CI always has them.
+    if args.output:
+        pathlib.Path(args.output).write_text(json.dumps(run, indent=2), encoding="utf-8")
+        print(f"{DIM}wrote report -> {args.output}{END}", file=sys.stderr)
+    if args.junit:
+        write_junit(run, args.junit)
+        print(f"{DIM}wrote JUnit XML -> {args.junit}{END}", file=sys.stderr)
 
     if not args.json:
         verdict = f"{GREEN}SHIP{END}" if ok else f"{RED}BLOCK{END}"
@@ -176,7 +330,7 @@ def cmd_run(args, base: str) -> int:
         if run.get("run_id"):
             print(f"{DIM}report: {base}/r/{run['run_id']}{END}")
 
-    write_step_summary(run, best, ok)
+    write_step_summary(run, best, ok, diff)
     return EXIT_OK if ok else EXIT_TESTS_FAILED
 
 
@@ -192,6 +346,48 @@ def cmd_models(args, base: str) -> int:
         print(m)
     print(f"{DIM}judge: {meta['judge_model']} · catalog: {meta['model_count']} "
           f"models ({meta['chat_count']} chat){END}")
+    return EXIT_OK
+
+
+def cmd_categories(args, base: str) -> int:
+    for c in api(base, "/api/meta", timeout=args.timeout)["categories"]:
+        print(c)
+    print("custom", f"{DIM}(bring your own rubric per test){END}")
+    return EXIT_OK
+
+
+def cmd_validate(args, base: str) -> int:
+    """Validate a suite YAML against the server without running it (no spend)."""
+    path = pathlib.Path(args.suite)
+    if not path.exists():
+        raise ApiError(f"suite file not found: {args.suite}")
+    try:
+        suite_id = api(base, "/api/suites",
+                       {"yaml_text": path.read_text(encoding="utf-8")}, args.timeout)["suite_id"]
+    except ApiError as e:
+        print(f"{RED}invalid{END} {args.suite}: {e}", file=sys.stderr)
+        return EXIT_TESTS_FAILED
+    suite = api(base, f"/api/suites/{suite_id}", timeout=args.timeout)
+    print(f"{GREEN}valid{END} {args.suite} {DIM}· {len(suite['tests'])} tests{END}")
+    return EXIT_OK
+
+
+def cmd_estimate(args, base: str) -> int:
+    models = [m.strip() for m in args.models.split(",") if m.strip()]
+    if not models:
+        raise ApiError("--models must list at least one model id")
+    suite_id = resolve_suite(base, args.suite, args.timeout)
+    est = api(base, "/api/estimate",
+              {"suite_id": suite_id, "models": models, "repeat": args.repeat}, args.timeout)
+    if args.json:
+        print(json.dumps(est, indent=2))
+        return EXIT_OK
+    print(f"{BOLD}{est['cells']} cells{END} {DIM}({est['num_tests']} tests × "
+          f"{len(est['models'])} model(s) × {est['repeat']} repeat) · "
+          f"{est['calls']} MeshAPI calls{END}")
+    for p in est["per_model"]:
+        print(f"  {p['model']:<32} ~${p['est_cost_usd']:.4f}")
+    print(f"{BOLD}~${est['est_cost_usd']:.4f} total{END}  {DIM}{est['note']}{END}")
     return EXIT_OK
 
 
@@ -213,13 +409,40 @@ def build_parser() -> argparse.ArgumentParser:
     runp.add_argument("--min-pass-rate", type=float, default=1.0, metavar="RATE",
                       help="pass rate the recommended model must reach, 0-1 "
                            "(default 1.0: every test must pass)")
+    runp.add_argument("--repeat", type=int, default=1, metavar="N",
+                      help="run each test N times to measure flakiness (default 1)")
+    runp.add_argument("--output", metavar="FILE",
+                      help="write the full JSON report to FILE (a CI artifact / baseline)")
+    runp.add_argument("--junit", metavar="FILE",
+                      help="write a JUnit XML report to FILE for CI test reporters")
+    runp.add_argument("--baseline", metavar="FILE",
+                      help="compare against a prior --output report and show regressions")
+    runp.add_argument("--fail-on-regression", action="store_true",
+                      help="exit non-zero if any cell that passed in the baseline now fails")
+    runp.add_argument("--fail-on-flaky", action="store_true",
+                      help="exit non-zero if any cell is flaky (needs --repeat > 1)")
     runp.set_defaults(func=cmd_run)
+
+    estp = sub.add_parser("estimate", help="estimate a run's cost/size without spending")
+    estp.add_argument("suite", help="path to suite YAML or a built-in suite id")
+    estp.add_argument("--models", required=True, help="comma-separated model ids (or auto)")
+    estp.add_argument("--repeat", type=int, default=1, metavar="N",
+                      help="repeats per cell (default 1)")
+    estp.add_argument("--json", action="store_true", help="print full JSON")
+    estp.set_defaults(func=cmd_estimate)
+
+    valp = sub.add_parser("validate", help="validate a suite YAML without running it")
+    valp.add_argument("suite", help="path to a suite YAML")
+    valp.set_defaults(func=cmd_validate)
 
     sp = sub.add_parser("suites", help="list suites available on the server")
     sp.set_defaults(func=cmd_suites)
 
     mp = sub.add_parser("models", help="list models available to benchmark")
     mp.set_defaults(func=cmd_models)
+
+    cp = sub.add_parser("categories", help="list built-in behavior categories")
+    cp.set_defaults(func=cmd_categories)
     return ap
 
 
@@ -229,6 +452,10 @@ def main():
     base = (args.url or os.environ.get("AGENTBENCH_URL") or DEFAULT_URL).rstrip("/")
     if getattr(args, "min_pass_rate", 1.0) < 0 or getattr(args, "min_pass_rate", 1.0) > 1:
         ap.error("--min-pass-rate must be between 0 and 1")
+    if getattr(args, "repeat", 1) < 1:
+        ap.error("--repeat must be at least 1")
+    if getattr(args, "fail_on_flaky", False) and getattr(args, "repeat", 1) == 1:
+        ap.error("--fail-on-flaky needs --repeat > 1 to have anything to measure")
     try:
         sys.exit(args.func(args, base))
     except ApiError as e:
