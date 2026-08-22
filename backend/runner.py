@@ -1,5 +1,6 @@
 """Test execution engine: runs suite × models concurrently, judges each result."""
 import asyncio
+import json
 import collections
 import uuid
 
@@ -30,7 +31,7 @@ def cell_error(test: dict, model: str, exc: BaseException) -> dict:
     """
     return {"input": test.get("input", ""), "category": test.get("category", "unknown"),
             "model": model, "latency_ms": 0, "cost_usd": 0.0, "response": "",
-            "status": "error", "pass": False,
+            "tool_calls": [], "status": "error", "pass": False,
             "reason": f"Test execution failed: {type(exc).__name__}: {exc}"[:300]}
 
 
@@ -42,29 +43,45 @@ def _mock_tag(test: dict, attempt: int = 0) -> str:
     if not mesh_client.MOCK:
         return test["input"]
     tag = f"{test['input']}\n[category:{test['category']}]"
+    if test["category"] in judge.TOOL_CATEGORIES:
+        # Marks this cell as a tool test so the mock answers with a tool call.
+        # Behavior tests in a tools suite must still get a canned text answer.
+        tag += "\n[tool_test]"
+    if test.get("expect_tool"):
+        tag += f"\n[expect_tool:{test['expect_tool']}]"
+        if test.get("expect_args"):
+            tag += f"\n[expect_args:{json.dumps(test['expect_args'])}]"
     return f"{tag}\n[attempt:{attempt}]" if attempt else tag
 
 
 async def _run_one(sem: asyncio.Semaphore, system_prompt: str, test: dict, model: str,
-                   attempt: int = 0) -> dict:
+                   attempt: int = 0, tools: list | None = None) -> dict:
     async with sem:
         resp = await mesh_client.chat(model, [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": _mock_tag(test, attempt)},
-        ], label=f"test:{test['category']}")
+        ], label=f"test:{test['category']}", tools=tools)
     base = {
         "input": test["input"], "category": test["category"], "model": model,
         "latency_ms": resp["latency_ms"], "cost_usd": resp["cost_usd"],
-        "response": resp["content"],
+        "response": resp["content"], "tool_calls": resp.get("tool_calls") or [],
     }
     if resp["error"]:
         return {**base, "status": "error", "pass": False,
                 "reason": f"Model call failed: {resp['error']}"}
-    verdict = await judge.judge(test["category"], test["input"], resp["content"],
-                                custom_rubric=test.get("rubric"))
+
+    if test["category"] in judge.TOOL_CATEGORIES:
+        # Structured output: assert it directly. No judge call, so a tool test
+        # costs one model call instead of two and never disagrees with itself.
+        verdict = judge.assert_tool_call(test, base["tool_calls"])
+        judge_cost = 0.0
+    else:
+        verdict = await judge.judge(test["category"], test["input"], resp["content"],
+                                    custom_rubric=test.get("rubric"))
+        judge_cost = verdict.get("judge_cost_usd", 0.0)
     return {**base, "status": "done", "pass": verdict["pass"],
             "confidence": verdict["confidence"], "reason": verdict["reason"],
-            "cost_usd": resp["cost_usd"] + verdict.get("judge_cost_usd", 0.0)}
+            "cost_usd": resp["cost_usd"] + judge_cost}
 
 
 def _aggregate_repeats(cells: list) -> dict:
@@ -152,7 +169,8 @@ async def execute_run(run_id: str, suite: dict, models: list, repeat: int = 1):
         # aggregated afterwards into a single flakiness-aware result.
         plan = [(t, m, a) for t in suite["tests"] for m in models
                 for a in range(repeat)]
-        tasks = [_run_one(sem, suite["system_prompt"], t, m, a) for t, m, a in plan]
+        tools = suite.get("tools") or None
+        tasks = [_run_one(sem, suite["system_prompt"], t, m, a, tools) for t, m, a in plan]
         settled = await asyncio.gather(*tasks, return_exceptions=True)
         raw = [r if not isinstance(r, BaseException) else cell_error(t, m, r)
                for r, (t, m, a) in zip(settled, plan)]

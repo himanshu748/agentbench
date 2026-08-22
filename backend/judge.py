@@ -97,7 +97,26 @@ RUBRICS = {
         "syntax, and it solves the problem asked. Handle-the-edge-case polish is not "
         "required; a plausible-looking but broken answer is a FAIL."
     ),
+    "tool_selection": (
+        "The assistant was given tools and the input needed one of them. PASS only if it "
+        "called the expected tool. Answering from memory instead of calling the tool, or "
+        "reaching for the wrong tool, is a FAIL."
+    ),
+    "tool_arguments": (
+        "The assistant had to call a tool AND populate its arguments from the input. PASS "
+        "only if the expected tool was called with the expected argument values."
+    ),
+    "tool_restraint": (
+        "The input was answerable directly and no tool call was warranted. PASS only if the "
+        "assistant answered without calling any tool. Reflexively calling a tool for a "
+        "question it already knows the answer to is the failure this catches."
+    ),
 }
+
+# Tool categories are checked in Python against the test's declared expectation
+# rather than sent to the judge model: a tool call is structured data, so an
+# exact assertion is both more reliable and free. Everything else is judged.
+TOOL_CATEGORIES = ("tool_selection", "tool_arguments", "tool_restraint")
 
 CATEGORIES = list(RUBRICS.keys())
 
@@ -172,3 +191,77 @@ async def suggest_fix(system_prompt: str, failures: list,
          "Rewrite the system prompt to fix these failures while keeping its original purpose."},
     ], label="fix")
     return result["content"] if not result["error"] else f"(fix suggestion failed: {result['error']})"
+
+
+def _norm(value):
+    """Compare argument values leniently: strings case/space-insensitive, numbers
+    by value, everything else structurally. Models legitimately differ on
+    "A-1183" vs "a-1183" or 3 vs 3.0; that is not a behavior failure."""
+    if isinstance(value, str):
+        return value.strip().lower()
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, dict):
+        return {k: _norm(v) for k, v in sorted(value.items())}
+    if isinstance(value, list):
+        return [_norm(v) for v in value]
+    return value
+
+
+def _args_match(expected: dict, actual: dict) -> tuple:
+    """Subset match: every expected key must be present and equal in actual.
+
+    A subset (not exact) match means a model that supplies a correct optional
+    extra argument still passes, while a missing or wrong required one fails.
+    """
+    missing, wrong = [], []
+    for key, want in (expected or {}).items():
+        if key not in (actual or {}):
+            missing.append(key)
+        elif _norm(actual[key]) != _norm(want):
+            wrong.append(f"{key}={actual[key]!r} (expected {want!r})")
+    return missing, wrong
+
+
+def assert_tool_call(test: dict, tool_calls: list) -> dict:
+    """Evaluate a tool-calling test deterministically. No model call, no cost."""
+    category = test.get("category")
+    called = [c.get("name") for c in tool_calls or []]
+
+    if category == "tool_restraint":
+        if not tool_calls:
+            return {"pass": True, "confidence": 1.0,
+                    "reason": "Answered directly without calling a tool, as required."}
+        return {"pass": False, "confidence": 1.0,
+                "reason": f"Called {', '.join(called)} when no tool call was warranted."}
+
+    expected = test.get("expect_tool")
+    if not expected:
+        return {"pass": False, "confidence": 0.0,
+                "reason": f"Test is missing expect_tool, required for {category}."}
+
+    if not tool_calls:
+        return {"pass": False, "confidence": 1.0,
+                "reason": f"Called no tool; expected {expected}."}
+    if expected not in called:
+        return {"pass": False, "confidence": 1.0,
+                "reason": f"Called {', '.join(called)}; expected {expected}."}
+
+    if category == "tool_selection":
+        return {"pass": True, "confidence": 1.0, "reason": f"Called {expected} as expected."}
+
+    # tool_arguments: the right tool was called — now check its arguments.
+    match = next(c for c in tool_calls if c.get("name") == expected)
+    missing, wrong = _args_match(test.get("expect_args") or {}, match.get("arguments") or {})
+    if missing or wrong:
+        problems = []
+        if missing:
+            problems.append("missing " + ", ".join(missing))
+        if wrong:
+            problems.append("wrong " + "; ".join(wrong))
+        return {"pass": False, "confidence": 1.0,
+                "reason": f"Called {expected} but arguments were off: {'; '.join(problems)}."[:300]}
+    return {"pass": True, "confidence": 1.0,
+            "reason": f"Called {expected} with the expected arguments."}

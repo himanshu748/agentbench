@@ -129,6 +129,29 @@ h1 em{font-style:normal;background:linear-gradient(92deg,var(--brand) 20%,var(--
 /* sections */
 section{padding:96px 0;position:relative;z-index:1}
 .sec-kicker{font:600 11.5px var(--mono);color:var(--brand);letter-spacing:.16em;text-transform:uppercase}
+/* --- tool calling --- */
+.toolsec{display:grid;grid-template-columns:1fr 1.05fr;gap:38px;align-items:center;margin-top:44px}
+@media(max-width:900px){.toolsec{grid-template-columns:1fr;gap:26px}}
+.toolsec .lead p{color:var(--muted);margin-top:14px;font-size:15.5px;line-height:1.72}
+.toolsec .lead p b{color:var(--text);font-weight:600}
+.tflow{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,.45)}
+.tflow .head{display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--border);
+  background:rgba(18,24,38,.6);font:600 10.5px var(--mono);letter-spacing:.12em;color:var(--dim)}
+.tflow .head i{width:8px;height:8px;border-radius:50%;background:var(--border2);display:block}
+.tstep{padding:13px 16px;border-bottom:1px solid var(--border);font:12px var(--mono)}
+.tstep:last-child{border-bottom:0}
+.tstep .k{font:600 9.5px var(--mono);letter-spacing:.14em;color:var(--dim);display:block;margin-bottom:6px}
+.tstep .decl{color:var(--link)}
+.tstep .said{color:var(--text)}
+.tstep .call{color:var(--brand2);word-break:break-word}
+.tstep.verdict{background:rgba(43,229,138,.07);display:flex;align-items:center;gap:10px;
+  font:600 12.5px var(--mono);color:var(--brand)}
+.tstep.verdict .x{width:19px;height:19px;border-radius:6px;background:rgba(43,229,138,.16);
+  border:1px solid rgba(43,229,138,.5);display:grid;place-items:center;font-size:11px}
+.tstep.verdict.bad{background:rgba(255,93,93,.07);color:var(--fail)}
+.tstep.verdict.bad .x{background:rgba(255,93,93,.16);border-color:rgba(255,93,93,.5)}
+.tnote{font:11.5px var(--mono);color:var(--dim);margin-top:14px}
 h2{font:700 clamp(30px,3.6vw,44px)/1.12 var(--disp);letter-spacing:-.025em;margin:12px 0 16px}
 .sec-sub{color:var(--muted);max-width:600px;font-size:17px}
 .center{text-align:center}.center .sec-sub{margin-inline:auto}
@@ -162,7 +185,8 @@ h2{font:700 clamp(30px,3.6vw,44px)/1.12 var(--disp);letter-spacing:-.025em;margi
 .case .go{font:600 12px var(--mono);color:var(--brand)}
 
 /* features */
-.feats{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:48px}
+.feats{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:48px}
+@media(max-width:1000px){.feats{grid-template-columns:repeat(2,1fr)}}
 .feat{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:30px;
   position:relative;transition:all .2s}
 .feat:hover{transform:translateY(-4px);border-color:rgba(43,229,138,.45);
@@ -222,7 +246,7 @@ footer b{color:var(--brand);font-weight:600}
   <a class="logo" href="/"><img src="/static/logo.svg" alt="" style="width:22px;height:22px;border-radius:6px">AgentBench</a>
   <div class="links">
     <a href="#how">How it works</a><a href="#cases">Use cases</a>
-    <a href="#features">Features</a><a href="#mesh">MeshAPI</a>
+    <a href="#tools">Tool calling</a><a href="#features">Features</a><a href="#mesh">MeshAPI</a>
   </div>
   <a class="cta" href="/app" style="margin-left:22px">Open the console</a>
 </div></nav>
@@ -231,7 +255,7 @@ footer b{color:var(--brand);font-weight:600}
   <div>
     <div class="kicker">CI for AI behavior</div>
     <h1 id="h1">Ship AI features with <em>proof</em>, not vibes.</h1>
-    <p class="sub">Your prompt is untested code. AgentBench runs it through <b>behavior tests</b> across the models on MeshAPI and returns pass rates, real cost per call, latency, and a <b>fix for whatever fails</b>. Before your users find it.</p>
+    <p class="sub">Your prompt is untested code. Your agent's tool calls are untested code. AgentBench runs both through <b>behavior tests</b> across the models on MeshAPI and returns pass rates, real cost per call, latency, and a <b>fix for whatever fails</b>. Before your users find it.</p>
     <div class="hero-ctas">
       <a class="cta big" href="/app">Run a benchmark<span class="arr">&#8594;</span></a>
       <a class="ghost" href="#how">See how it works</a>
@@ -247,7 +271,7 @@ footer b{color:var(--brand);font-weight:600}
       <span class="t"><span class="c">$</span> <span id="typed"></span><span class="cursor"></span></span></div>
     <div class="inner">
       <div class="gv-table" id="gvtable"></div>
-      <div class="gv-reco" id="gvreco" style="display:none">&#127942; SHIP gpt-4o-mini &middot; 5/5 passed &middot; $0.0004 &middot; 479ms avg</div>
+      <div class="gv-reco" id="gvreco" style="display:none">&#127942; SHIP gpt-4o-mini &middot; 6/6 passed &middot; $0.0005 &middot; 479ms avg</div>
     </div>
   </div>
 </div></header>
@@ -256,7 +280,7 @@ footer b{color:var(--brand);font-weight:600}
   <div class="stat rv"><b><i data-count="1000">0</i>+</b><span>LLMs on MeshAPI<br>
     <span style="font:11px var(--mono);color:var(--dim)" id="livecount"></span></span></div>
   <div class="stat rv d1"><b>&frac12;<span style="font-size:22px">&cent;</span></b><span>for a full benchmark run</span></div>
-  <div class="stat rv d2"><b><i id="suitecount" data-count="15">0</i></b><span>ready-made use case suites</span></div>
+  <div class="stat rv d2"><b><i id="suitecount" data-count="17">0</i></b><span>ready-made use case suites</span></div>
   <div class="stat rv d3"><b><i data-count="5">0</i>s</b><span>from prompt to verdict, measured live</span></div>
 </div></div>
 
@@ -266,7 +290,7 @@ footer b{color:var(--brand);font-weight:600}
   <p class="sec-sub rv">LLM output changes on every call, so string equality can never test it. AgentBench tags each test with a behavior category and a judge model scores every response against that category's rubric.</p>
   <div class="steps">
     <div class="step rv"><div class="n">1</div><h3>Define tests in YAML</h3>
-      <p>Each case is an input plus an expected behavior. Sixteen built-in categories — from <code>injection_resistance</code> and <code>pii_refusal</code> to <code>context_grounding</code>, <code>numeric_accuracy</code>, <code>over_refusal</code> and <code>safety_refusal</code> — plus <code>custom</code> with your own plain-English rubric. Or let the red team generator write the tests for you.</p></div>
+      <p>Each case is an input plus an expected behavior. Nineteen built-in categories — from <code>injection_resistance</code> and <code>pii_refusal</code> to <code>context_grounding</code>, <code>numeric_accuracy</code>, <code>over_refusal</code> and <code>tool_selection</code>, plus <code>custom</code> with your own plain-English rubric. Or let the red team generator write the tests for you.</p></div>
     <div class="step rv d1"><div class="n">2</div><h3>Run across models</h3>
       <p>Every test hits every model you pick, concurrently, through MeshAPI's unified endpoint. Include <code>auto</code> to benchmark MeshAPI's smart routing against fixed models. Timeouts become error cells. Nothing crashes a run.</p></div>
     <div class="step rv d2"><div class="n">3</div><h3>Read the verdict</h3>
@@ -276,7 +300,7 @@ footer b{color:var(--brand);font-weight:600}
 
 <section id="cases" style="padding-top:0"><div class="wrap">
   <div class="sec-kicker rv">Use cases</div>
-  <h2 class="rv">Fifteen suites, ready to run.</h2>
+  <h2 class="rv">Seventeen suites, ready to run.</h2>
   <p class="sec-sub rv">Every suite encodes the failure modes that actually burn teams in production. Load one, or use them as templates for your own bot.</p>
   <div class="cases">
     <a class="case rv" href="/app"><span class="em">&#127981;</span><h3>Customer Support Bot</h3>
@@ -293,23 +317,74 @@ footer b{color:var(--brand);font-weight:600}
       <p>Location-dependent answers, confidential guidance, invented stipends.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
     <a class="case rv d5" href="/app"><span class="em">&#127908;</span><h3>Brand Voice Bot</h3>
       <p>Custom rubrics: lowercase-only voice, language matching, JSON format, PII refusal.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+    <a class="case rv" href="/app"><span class="em">&#128296;</span><h3>Support Agent (tools)</h3>
+      <p>Four live operations. Right tool, exact arguments, refund ceilings, and no call when none is needed.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+    <a class="case rv d1" href="/app"><span class="em">&#128268;</span><h3>API Orchestration</h3>
+      <p>Internal ops wired to company APIs. Destructive calls need confirmation, missing ids need a question.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+    <a class="case rv d2" href="/app"><span class="em">&#128218;</span><h3>RAG Knowledge Bot</h3>
+      <p>Answers only from the supplied context, and says so plainly when the answer is not in it.</p><span class="go">Run this suite <span class="arr">&#8594;</span></span></a>
+  </div>
+</div></section>
+
+<section id="tools" style="padding-top:0"><div class="wrap">
+  <div class="sec-kicker rv">Tool calling</div>
+  <h2 class="rv">An agent is its tool calls.</h2>
+  <p class="sec-sub rv">Prose gets judged by a model. A tool call is structured data, so AgentBench asserts it exactly: the right tool, with the right arguments, and no tool at all when none was warranted.</p>
+  <div class="toolsec">
+    <div class="lead rv">
+      <p>Declare your tools once in the suite. Every test then states what should happen: <b>tool_selection</b> for the right tool, <b>tool_arguments</b> for the values carried through from the user, and <b>tool_restraint</b> for the questions a good agent answers without reaching for anything.</p>
+      <p>Because the check is an assertion and not a judgement, a tool test costs one model call instead of two, runs in Python, and never disagrees with itself between runs.</p>
+      <p class="tnote">Argument matching is lenient where it should be. "A-1183" equals "a-1183", 3 equals 3.0, and a correct extra argument does not fail the test.</p>
+    </div>
+    <div class="tflow rv d1">
+      <div class="head"><i></i><i></i><i></i><span style="margin-left:6px">TOOL_ARGUMENTS</span></div>
+      <div class="tstep"><span class="k">SUITE DECLARES</span>
+        <span class="decl">issue_refund(order_id: string, amount_usd: number)</span></div>
+      <div class="tstep"><span class="k">USER SAYS</span>
+        <span class="said">"Please refund order C-7781 for $42.00."</span></div>
+      <div class="tstep"><span class="k">AGENT CALLS</span>
+        <span class="call">issue_refund({"order_id": "C-7781", "amount_usd": 42.0})</span></div>
+      <div class="tstep verdict"><span class="x">&#10003;</span>
+        PASS &middot; expected tool, expected arguments</div>
+    </div>
+  </div>
+  <div class="toolsec" style="margin-top:22px">
+    <div class="tflow rv">
+      <div class="head"><i></i><i></i><i></i><span style="margin-left:6px">TOOL_RESTRAINT</span></div>
+      <div class="tstep"><span class="k">USER SAYS</span>
+        <span class="said">"How many days do I have to return something?"</span></div>
+      <div class="tstep"><span class="k">AGENT CALLS</span>
+        <span class="call">lookup_order({"order_id": "unknown"})</span></div>
+      <div class="tstep verdict bad"><span class="x">&#10007;</span>
+        FAIL &middot; called a tool for a question it already knew</div>
+    </div>
+    <div class="lead rv d1">
+      <p><b>Over-calling is a real failure mode</b> and almost nothing tests for it. An agent that hits your API for every policy question is slow, expensive, and wrong in a way that looks like diligence.</p>
+      <p>Two of the seventeen suites are built for tools: a support agent with four operations and refund limits, and an internal ops agent wired to company APIs. Both mix tool tests with the behavior tests that catch an agent going off the rails while it holds real capabilities.</p>
+    </div>
   </div>
 </div></section>
 
 <section id="features" style="padding-top:0"><div class="wrap">
   <div class="sec-kicker rv">Features</div>
-  <h2 class="rv">Four things no eyeball test gives you.</h2>
+  <h2 class="rv">Six things no eyeball test gives you.</h2>
   <div class="feats">
-    <div class="feat rv"><div class="pill">CLOSED LOOP</div><div class="icon">&#128295;</div>
+    <div class="feat rv"><div class="pill">NON-DETERMINISM</div><div class="icon">&#8776;</div>
+      <h3>Flakiness, measured</h3>
+      <p>Run each test three or five times and AgentBench reports how often the verdict changes. The variance that makes exact-match testing impossible stops being an excuse and becomes a number you can gate on.</p></div>
+    <div class="feat rv d1"><div class="pill">CLOSED LOOP</div><div class="icon">&#128295;</div>
       <h3>Fix and re-run</h3>
       <p>When tests fail, AgentBench drafts a corrected system prompt, re-runs the suite with it, and shows before and after pass counts side by side. Your prompt heals itself while you watch.</p></div>
-    <div class="feat rv d1"><div class="pill">SECURITY</div><div class="icon">&#127919;</div>
+    <div class="feat rv d2"><div class="pill">SECURITY</div><div class="icon">&#127919;</div>
       <h3>Red team generator</h3>
       <p>Paste your system prompt and AgentBench writes the adversarial tests for you: injection attacks, fabrication bait, hostile users, missing-context traps. Then it runs them.</p></div>
-    <div class="feat rv d2"><div class="pill">CI/CD</div><div class="icon">&#128200;</div>
-      <h3>Regression timeline</h3>
-      <p>Every run lands in a history timeline. Change your prompt, run again, and see exactly which model and which behavior category regressed, with deltas between runs. Run each test several times to measure flakiness — the same non-determinism that makes exact-match testing impossible, now quantified.</p></div>
-    <div class="feat rv d3"><div class="pill">SHAREABLE</div><div class="icon">&#127942;</div>
+    <div class="feat rv d3"><div class="pill">CI/CD</div><div class="icon">&#128200;</div>
+      <h3>Regression gate</h3>
+      <p>Save a run as a baseline, then fail the build only on the cells that newly broke. A pass rate that stayed flat while a different test regressed still blocks the merge.</p></div>
+    <div class="feat rv"><div class="pill">PIPELINE</div><div class="icon">&#128220;</div>
+      <h3>JUnit and job summaries</h3>
+      <p>The CLI emits JUnit XML that GitHub, GitLab and Jenkins render natively, a JSON artifact for the next baseline, and a markdown table straight into the Actions job summary.</p></div>
+    <div class="feat rv d1"><div class="pill">SHAREABLE</div><div class="icon">&#127942;</div>
       <h3>Quality gate badge</h3>
       <p>Every run mints a CI-style badge with copy-paste README markdown. Green means every behavior test passed on the recommended model.</p></div>
   </div>
@@ -335,7 +410,7 @@ footer b{color:var(--brand);font-weight:600}
 <section class="final"><div class="wrap">
   <img class="badgeimg rv" src="/api/badge.svg?label=AgentBench&passed=5&total=5" alt="AgentBench quality badge">
   <h2 class="rv">Your users are already testing it.<br>Beat them to it.</h2>
-  <p class="sec-sub rv" style="margin:0 auto 32px">No signup. Fifteen preloaded suites. A full run costs about half a cent.</p>
+  <p class="sec-sub rv" style="margin:0 auto 32px">No signup. Seventeen preloaded suites. A full run costs about half a cent.</p>
   <a class="cta big rv" href="/app">Run a benchmark now</a>
 </div></section>
 
@@ -346,8 +421,9 @@ footer b{color:var(--brand);font-weight:600}
 
 <script>
 // hero terminal: staggered pass/fail loop
-const rows=[["clarification","p","p","f"],["injection","p","p","p"],["conciseness","p","f","f"],
-            ["tone","p","p","p"],["fabrication","p","f","p"]];
+const rows=[["tool_selection","p","p","f"],["tool_arguments","p","f","f"],
+            ["tool_restraint","p","p","f"],["injection","p","p","p"],
+            ["clarification","p","p","f"],["fabrication","p","f","p"]];
 const models=["gpt-4o-mini","haiku-4.5","llama-70b"];
 function playGrid(){
   const t=document.getElementById('gvtable');
@@ -390,7 +466,7 @@ addEventListener('scroll',()=>{
 
 // terminal: type the command, then run the grid
 (function(){
-  const cmd='agentbench run customer-support',el=document.getElementById('typed');
+  const cmd='agentbench run tool-agent',el=document.getElementById('typed');
   let i=0;(function type(){if(i<=cmd.length){el.textContent=cmd.slice(0,i++);setTimeout(type,38)}})();
 })();
 

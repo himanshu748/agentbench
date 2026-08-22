@@ -45,6 +45,11 @@ th{color:var(--dim);font:600 10px var(--mono);text-transform:uppercase;letter-sp
 .cell small{display:block;color:var(--muted);font:10.5px var(--mono);margin-top:3px}
 .catlabel{font:600 10.5px var(--mono);color:var(--link)}
 .empty{color:var(--muted);padding:80px 0;text-align:center}
+.cell.flaky{background:rgba(255,178,36,.12);border:1px dashed rgba(255,178,36,.75)}
+.cell .tools{display:block;margin-top:4px;font:10px var(--mono);color:var(--link);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flakyline{margin-top:16px;padding:11px 14px;border:1px solid var(--border);border-radius:12px;
+  background:var(--surface);font:12px var(--mono)}
 .badgezone{margin-top:20px}
 .badgezone img{height:26px}
 </style>
@@ -77,11 +82,21 @@ const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]
     html+=`<tr><td><span class="catlabel">${row.category}</span><br>${esc(row.input.slice(0,90))}${row.input.length>90?'...':''}</td>`;
     for(const m of models){
       const x=byKey[row.input+'|'+m];
-      const cls=x.status==='error'?'err':(x.pass?'pass':'fail');
-      const label=x.status==='error'?'&#9888; error':(x.pass?'&#10003; pass':'&#10007; fail');
-      html+=`<td><div class="cell ${cls}"><b>${label}</b><small>${x.latency_ms}ms &middot; $${x.cost_usd.toFixed(5)}</small></div></td>`}
+      const cls=x.status==='error'?'err':(x.flaky?'flaky':(x.pass?'pass':'fail'));
+      const label=x.status==='error'?'&#9888; error'
+        :(x.flaky?'&#8776; flaky':(x.pass?'&#10003; pass':'&#10007; fail'));
+      const rate=x.runs>1?` <small style="display:inline">${x.passes}/${x.runs}</small>`:'';
+      const tools=(x.tool_calls&&x.tool_calls.length)
+        ? `<span class="tools">&#8627; ${x.tool_calls.map(c=>esc(c.name)+'()').join(' ')}</span>`:'';
+      html+=`<td><div class="cell ${cls}"><b>${label}${rate}</b><small>${x.latency_ms}ms &middot; $${x.cost_usd.toFixed(5)}</small>${tools}</div></td>`}
     html+='</tr>'}
-  html+=`</table></div>
+  html+='</table></div>';
+  const fk=run.flakiness;
+  if(fk&&fk.measured){
+    html+=`<div class="flakyline"><b>Flakiness</b> &middot; each test run ${fk.repeat}&times;: `+
+      `<b style="color:${fk.flaky_count?'var(--warn)':'var(--brand)'}">${fk.flaky_count}/${fk.total_cells} cells flaky</b> `+
+      `<span style="color:var(--dim)">(consistency ${Math.round(fk.consistency*100)}%)</span></div>`}
+  html+=`
     <div class="badgezone"><img src="/api/badge.svg?label=${encodeURIComponent(run.suite_name||'suite')}&passed=${best.passed}&total=${best.total}"></div>`;
   el.innerHTML=html;
   document.title='AgentBench &middot; '+(run.suite_name||'report');

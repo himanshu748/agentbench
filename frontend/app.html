@@ -14,6 +14,10 @@
   --brand:#2BE58A; --brand2:#7CF5C8; --fail:#FF5D5D; --warn:#FFB224; --link:#6FA8FF;
   --disp:'Space Grotesk',system-ui,sans-serif; --body:'Inter',system-ui,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,monospace;
+  /* Chart marks need a darker step than the UI brand colors: on this surface
+     the bright brand hues sit at OKLCH L 0.69-0.82, outside the 0.48-0.67 band
+     that keeps a filled mark legible instead of glaring. Same hues, re-stepped. */
+  --mark:#00AE5B; --mark-alt:#578FE4; --mark-track:#1A2230; --grid:#182031;
 }
 *{box-sizing:border-box;margin:0}
 body{background:var(--bg);color:var(--text);font:15px/1.6 var(--body);
@@ -64,6 +68,21 @@ h2 .num{width:22px;height:22px;border-radius:7px;background:rgba(43,229,138,.12)
 .suite span{color:var(--muted);font:12px var(--mono)}
 .suite .tag{float:right;font:600 9.5px var(--mono);letter-spacing:.1em;color:var(--warn);
   border:1px solid rgba(255,178,36,.4);border-radius:10px;padding:2px 8px;margin-top:2px}
+.suite .tag.tools{color:var(--link);border-color:rgba(111,168,255,.45)}
+/* 15 suites would otherwise push the model picker and run button below the fold. */
+.suitelist{max-height:330px;overflow-y:auto;padding-right:4px;margin-right:-4px}
+.suitelist::-webkit-scrollbar{width:6px}
+.suitelist::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+.suitelist .none{font:12px var(--mono);color:var(--dim);padding:10px 2px}
+#models{max-height:300px;overflow-y:auto;padding-right:4px;margin-right:-4px}
+#models::-webkit-scrollbar{width:6px}
+#models::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+/* The run button stays put while the two long pickers scroll behind it. */
+.runwrap{position:sticky;bottom:14px;margin-top:14px;z-index:5}
+.repeatrow{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.repeatrow label{font:11px var(--mono);color:var(--dim);white-space:nowrap}
+.repeatrow select{width:auto;margin:0;padding:5px 9px;flex:0 0 auto}
+.repeatrow .hint{font:10.5px var(--mono);color:var(--dim);flex:1 1 100%;margin-top:-2px}
 
 .prov{font:600 10px var(--mono);letter-spacing:.12em;color:var(--dim);text-transform:uppercase;
   margin:12px 0 7px}
@@ -147,6 +166,27 @@ tr:last-child td{border-bottom:0}
 .cell.fail{background:rgba(255,93,93,.09);border:1px solid rgba(255,93,93,.5)}
 .cell.err{background:rgba(255,178,36,.09);border:1px solid rgba(255,178,36,.5)}
 .cell.flaky{background:rgba(255,178,36,.12);border:1px dashed rgba(255,178,36,.75)}
+.cell .tools{display:block;margin-top:4px;font:10px var(--mono);color:var(--link);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* --- charts --- */
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+@media(max-width:1080px){.charts{grid-template-columns:1fr}}
+.chartcard{border:1px solid var(--border);border-radius:14px;background:var(--surface);padding:14px 16px 12px}
+.chartcard h3{font:600 12.5px var(--body);letter-spacing:-.01em;color:var(--text);margin:0}
+.chartcard .sub{font:11px var(--mono);color:var(--dim);margin-top:3px;margin-bottom:10px}
+.chartcard svg{display:block;width:100%;overflow:visible}
+.chartcard .ax{fill:var(--muted);font:10px var(--mono)}
+.chartcard .lbl{fill:var(--text);font:10.5px var(--mono)}
+.chartcard .lblq{fill:var(--muted);font:10px var(--mono)}
+.ctip{position:fixed;z-index:60;pointer-events:none;opacity:0;transition:opacity .12s;
+  background:var(--raised);border:1px solid var(--border2);border-radius:8px;padding:7px 9px;
+  font:11px var(--mono);color:var(--text);box-shadow:0 8px 24px rgba(0,0,0,.5);max-width:260px}
+.ctip.on{opacity:1}
+.ctip i{color:var(--dim);font-style:normal}
+.toolcall{font:11px var(--mono);background:var(--raised);border:1px solid var(--border);
+  border-radius:8px;padding:7px 9px;margin-top:6px;color:var(--link);word-break:break-word}
+.toolcall b{color:var(--text)}
+.toolnone{font:11px var(--mono);color:var(--dim);margin-top:6px}
 .flakybar{margin-top:16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;
   background:var(--card);font:12px var(--mono)}
 .flakybar .fk-cell{color:var(--warn);margin-top:5px}
@@ -221,8 +261,10 @@ dialog pre{white-space:pre-wrap;font:12px var(--mono);background:var(--raised);p
 <div class="wrap"><div class="grid">
   <div>
     <div class="panel">
-      <h2><span class="num">1</span>Test suite</h2>
-      <div id="suites"></div>
+      <h2><span class="num">1</span>Test suite<span id="suitecount" style="margin-left:auto;font:11px var(--mono);color:var(--dim);text-transform:none;letter-spacing:0"></span></h2>
+      <input type="text" id="suitefilter" placeholder="Filter suites..." oninput="renderSuiteList()"
+        style="margin-top:0;margin-bottom:10px">
+      <div id="suites" class="suitelist"></div>
       <details><summary>Build your own suite</summary>
         <input type="text" id="bname" placeholder="Suite name, e.g. My Support Bot">
         <textarea id="bprompt" style="height:64px" placeholder="System prompt of the bot under test..."></textarea>
@@ -245,17 +287,18 @@ dialog pre{white-space:pre-wrap;font:12px var(--mono);background:var(--raised);p
       <h2><span class="num">2</span>Models via MeshAPI</h2>
       <div id="models"></div>
       <div class="count" id="selcount">Pick up to 4 models. <i>auto</i> is MeshAPI smart routing.</div>
-      <div class="count" style="margin-top:10px;display:flex;align-items:center;gap:8px">
-        <label for="repeat" style="cursor:pointer">Repeats per test</label>
-        <select id="repeat" onchange="updateBtn()"
-          style="background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:12px var(--mono)">
-          <option value="1">1 (fast)</option>
-          <option value="3">3 (detect flakiness)</option>
-          <option value="5">5</option>
+      <div class="repeatrow">
+        <label for="repeat">Repeats per test</label>
+        <select id="repeat" onchange="updateBtn()">
+          <option value="1">1 &mdash; fast</option>
+          <option value="3">3 &mdash; detect flakiness</option>
+          <option value="5">5 &mdash; thorough</option>
         </select>
-        <span style="color:var(--dim)">runs each test N times to measure non-determinism</span>
+        <span class="hint">Runs each test N times and reports how often the verdict changes.</span>
       </div>
-      <button class="run" id="runbtn" onclick="startRun()" disabled>Run benchmark<span class="arr">&#8594;</span></button>
+      <div class="runwrap">
+        <button class="run" id="runbtn" onclick="startRun()" disabled>Run benchmark<span class="arr">&#8594;</span></button>
+      </div>
     </div>
     <div class="panel" id="histpanel" style="display:none;margin-top:20px">
       <h2><span class="num">&#8635;</span>Run history</h2>
@@ -303,12 +346,23 @@ async function init(){
 }
 async function loadSuites(sel){
   suites=await api('/suites');
-  $('suites').innerHTML=suites.map(s=>{
+  if(sel)selSuite=sel;
+  renderSuiteList();
+  if(sel)updateBtn();
+}
+function renderSuiteList(){
+  const q=($('suitefilter').value||'').trim().toLowerCase();
+  const shown=suites.filter(s=>!q||(s.name||'').toLowerCase().includes(q)
+    ||s.suite_id.toLowerCase().includes(q));
+  $('suitecount').textContent=q?`${shown.length}/${suites.length}`:`${suites.length}`;
+  $('suites').innerHTML=shown.length?shown.map(s=>{
     const rt=s.suite_id.startsWith('redteam');
-    return `<div class="suite ${s.suite_id===sel?'sel':''}" data-id="${s.suite_id}" onclick="selectSuite('${s.suite_id}',this)">
-      ${rt?'<span class="tag">RED TEAM</span>':''}<b>${esc(s.name||s.suite_id)}</b>
-      <span>${s.num_tests} tests</span></div>`}).join('');
-  if(sel){selSuite=sel;updateBtn()}
+    const tools=s.num_tools>0;
+    return `<div class="suite ${s.suite_id===selSuite?'sel':''}" data-id="${s.suite_id}" onclick="selectSuite('${s.suite_id}',this)">
+      ${rt?'<span class="tag">RED TEAM</span>':tools?`<span class="tag tools">${s.num_tools} TOOLS</span>`:''}
+      <b>${esc(s.name||s.suite_id)}</b>
+      <span>${s.num_tests} tests</span></div>`}).join('')
+    :'<div class="none">No suite matches that filter.</div>';
 }
 function selectSuite(id,el){selSuite=id;
   document.querySelectorAll('.suite').forEach(e=>e.classList.remove('sel'));
@@ -458,6 +512,104 @@ async function fixRerun(){
     saveHist(fixedRun,'(fixed)');render(lastRun);renderHist();toast('Fix benchmarked')}
   catch(e){alert(e.message);b.textContent='Apply fix and re-run';b.disabled=false}}
 
+
+/* ---------------------------------------------------------------- charts
+   Two charts, both inline SVG (no libraries, nothing to load).
+
+   1. Cost vs pass rate: the actual shipping decision. At most four points, so
+      every dot is directly labeled with its model name - identity never rides
+      on color, which is what lets the recommended model use the status green
+      without color doing double duty.
+   2. Pass rate by category: one series, one hue, sorted worst-first. Bar length
+      already encodes the value, so coloring bars by their value would just
+      re-encode it.
+   Values here are never tooltip-only: the cell grid and the per-model line
+   below carry every number. */
+
+const CT = (()=>{let el=null;return{
+  show(html,x,y){ if(!el){el=document.createElement('div');el.className='ctip';document.body.appendChild(el)}
+    el.innerHTML=html;el.classList.add('on');
+    const r=el.getBoundingClientRect();
+    el.style.left=Math.min(x+14,innerWidth-r.width-10)+'px';
+    el.style.top=Math.max(y-r.height-12,8)+'px'},
+  hide(){ if(el)el.classList.remove('on')}}})();
+
+function chartCostQuality(run){
+  const pts=run.summary.per_model.filter(p=>p.total>0);
+  if(pts.length<2)return '';           // one point is a stat, not a scatter
+  const W=460,H=210,L=46,R=96,T=14,B=34;
+  const costs=pts.map(p=>p.total_cost_usd);
+  const maxC=Math.max(...costs)*1.15||0.01;
+  const px=c=>L+(c/maxC)*(W-L-R);
+  const py=r=>T+(1-r)*(H-T-B);
+  let g='';
+  for(let i=0;i<=4;i++){const y=py(i/4);
+    g+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>`+
+       `<text class="ax" x="${L-8}" y="${y+3.5}" text-anchor="end">${i*25}%</text>`}
+  for(let i=0;i<=3;i++){const c=maxC*i/3;
+    g+=`<text class="ax" x="${px(c)}" y="${H-B+16}" text-anchor="middle">$${c.toFixed(3)}</text>`}
+  g+=`<text class="ax" x="${(L+W-R)/2}" y="${H-B+30}" text-anchor="middle">total run cost</text>`;
+  const marks=pts.map(p=>{
+    const best=p.model===run.summary.recommended;
+    const x=px(p.total_cost_usd),y=py(p.pass_rate??(p.passed/p.total));
+    const short=p.model==='auto'?'auto':p.model.split('/').pop();
+    const tip=`<b>${esc(p.model)}</b><br>${p.passed}/${p.total} passed`+
+      `<br><i>$${p.total_cost_usd.toFixed(4)} &middot; ${p.avg_latency_ms}ms</i>`;
+    return `<g class="pt" data-tip="${encodeURIComponent(tip)}">`+
+      // 2px surface ring keeps overlapping dots readable; r=16 is the hit target.
+      `<circle cx="${x}" cy="${y}" r="16" fill="transparent"/>`+
+      `<circle cx="${x}" cy="${y}" r="7" fill="${best?'var(--mark)':'var(--mark-alt)'}"
+        stroke="var(--surface)" stroke-width="2"/>`+
+      `<text class="${best?'lbl':'lblq'}" x="${x+12}" y="${y+3.5}">${esc(short)}${best?' &#9733;':''}</text></g>`;
+  }).join('');
+  return `<div class="chartcard"><h3>Cost vs quality</h3>
+    <div class="sub">up and to the left wins &middot; &#9733; recommended</div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Pass rate against total run cost per model">
+      ${g}<line x1="${L}" x2="${L}" y1="${T}" y2="${H-B}" stroke="var(--grid)" stroke-width="1"/>
+      ${marks}</svg></div>`;
+}
+
+function chartByCategory(run){
+  const agg={};
+  for(const r of run.results){
+    const a=agg[r.category]||(agg[r.category]={p:0,n:0});
+    a.n++; if(r.pass)a.p++;
+  }
+  const rows=Object.entries(agg).map(([k,v])=>({cat:k,rate:v.p/v.n,p:v.p,n:v.n}))
+    .sort((a,b)=>a.rate-b.rate);            // worst first: the eye lands on problems
+  if(rows.length<2)return '';
+  const rowH=24,W=460,L=150,R=44,T=6;
+  const H=T+rows.length*rowH+6;
+  const bars=rows.map((r,i)=>{
+    const y=T+i*rowH, bw=Math.max((W-L-R)*r.rate,r.rate>0?3:0);
+    const tip=`<b>${esc(r.cat)}</b><br>${r.p}/${r.n} passed <i>(${Math.round(r.rate*100)}%)</i>`;
+    return `<g class="pt" data-tip="${encodeURIComponent(tip)}">`+
+      `<rect x="0" y="${y}" width="${W}" height="${rowH}" fill="transparent"/>`+
+      `<text class="lblq" x="${L-10}" y="${y+13.5}" text-anchor="end">${esc(r.cat)}</text>`+
+      `<rect x="${L}" y="${y+3}" width="${W-L-R}" height="14" rx="4" fill="var(--mark-track)"/>`+
+      (bw>0?`<rect x="${L}" y="${y+3}" width="${bw}" height="14" rx="4" fill="var(--mark)"/>`:'')+
+      `<text class="lbl" x="${W-R+8}" y="${y+13.5}">${r.p}/${r.n}</text></g>`;
+  }).join('');
+  return `<div class="chartcard"><h3>Pass rate by behavior category</h3>
+    <div class="sub">all models combined &middot; weakest first</div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Pass rate for each behavior category">
+      ${bars}</svg></div>`;
+}
+
+function renderCharts(run){
+  const a=chartCostQuality(run),b=chartByCategory(run);
+  return (a||b)?`<div class="charts">${a}${b}</div>`:'';
+}
+function bindChartTips(){
+  document.querySelectorAll('#report .pt').forEach(g=>{
+    const tip=decodeURIComponent(g.dataset.tip||'');
+    const show=e=>CT.show(tip,e.clientX,e.clientY);
+    g.addEventListener('mousemove',show);
+    g.addEventListener('mouseenter',show);
+    g.addEventListener('mouseleave',()=>CT.hide());
+  });
+}
+
 function totalPass(run){return run.results.filter(r=>r.pass).length}
 
 function render(run){
@@ -478,8 +630,10 @@ function render(run){
       const cls=r.status==='error'?'err':(r.flaky?'flaky':(r.pass?'pass':'fail'));
       let label=r.status==='error'?'&#9888; error':(r.flaky?'&#8776; flaky':(r.pass?'&#10003; pass':'&#10007; fail'));
       const rate=(r.runs>1)?` <small style="display:inline;color:var(--muted)">${r.passes}/${r.runs}</small>`:'';
+      const tools=(r.tool_calls&&r.tool_calls.length)
+        ? `<span class="tools">&#8627; ${r.tool_calls.map(c=>esc(c.name)+'()').join(' ')}</span>`:'';
       html+=`<td><div class="cell ${cls}" style="animation-delay:${ci*45}ms" title="View the agent's reply" onclick="showDetail(${r.idx})">
-        <b>${label}${rate}</b><small>${r.latency_ms}ms &middot; $${r.cost_usd.toFixed(5)}</small></div></td>`;ci++}
+        <b>${label}${rate}</b><small>${r.latency_ms}ms &middot; $${r.cost_usd.toFixed(5)}</small>${tools}</div></td>`;ci++}
     html+='</tr>'}
   html+='</table></div>';
   const fk=run.flakiness;
@@ -491,7 +645,8 @@ function render(run){
         `<div class="fk-cell">&#8776; ${c.category} &mdash; ${c.passes}/${c.runs} passed &middot; ${c.model==='auto'?'auto':c.model.split('/').pop()}</div>`).join('')+
       `</div>`;
   }
-  html+='<div style="margin-top:9px;font:11px var(--mono);color:var(--dim)">&#128269; Click any cell to read the agent\'s full reply and the judge\'s reasoning.</div>';
+  html+='<div style="margin-top:9px;font:11px var(--mono);color:var(--dim)">&#128269; Click any cell to read the agent\'s full reply, tool calls, and the judge\'s reasoning.</div>';
+  html+=renderCharts(run);
   html+='<div class="permodel">'+s.per_model.map(p=>
     `<span><b>${p.model==='auto'?'auto':p.model.split('/').pop()}</b> ${p.passed}/${p.total}${p.flaky?` &middot; <span style="color:var(--warn)">${p.flaky} flaky</span>`:''} &middot; $${p.total_cost_usd.toFixed(4)} &middot; ${p.avg_latency_ms}ms</span>`).join('')+'</div>';
 
@@ -521,16 +676,29 @@ function render(run){
     <button class="btn2 accent" onclick="shareReport()">Share report link</button>
     <button class="btn2" onclick="exportReport()">Export JSON</button></div>`;
   $('report').innerHTML=html;
+  bindChartTips();
 }
 function viewFixed(){const tmp=lastRun;lastRun=fixedRun;const f=fixedRun;fixedRun=null;render(f);lastRun=tmp}
+
+function toolBlock(r){
+  const calls=r.tool_calls||[];
+  const label='<label style="display:block;font:600 10px var(--mono);letter-spacing:.1em;'+
+    'color:var(--link);margin-top:14px">TOOL CALLS</label>';
+  if(!calls.length){
+    // Absence is the signal for tool_restraint, so say it rather than hide it.
+    return r.category&&r.category.startsWith('tool_')
+      ? label+'<div class="toolnone">none &mdash; the agent answered directly</div>':''}
+  return label+calls.map(c=>`<div class="toolcall"><b>${esc(c.name)}</b>(${
+    esc(JSON.stringify(c.arguments||{},null,0))})</div>`).join('')}
 
 function showDetail(i){showDetailObj(lastRun.results[i])}
 function showDetailObj(r){
   $('dlgbody').innerHTML=`<b style="font-family:var(--mono)">${r.model}</b> &middot; <span class="catlabel">${r.category}</span>
     <label style="display:block;font:600 10px var(--mono);letter-spacing:.1em;color:var(--dim);margin-top:14px">USER INPUT</label>
     <pre style="margin-top:6px">${esc(r.input)}</pre>
+    ${toolBlock(r)}
     <label style="display:block;font:600 10px var(--mono);letter-spacing:.1em;color:var(--brand);margin-top:12px">AGENT REPLY</label>
-    <pre style="margin-top:6px;border-left:2px solid var(--brand);">${esc(r.response)}</pre>
+    <pre style="margin-top:6px;border-left:2px solid var(--brand);">${esc(r.response)||'<span style="color:var(--dim)">(no text; the agent answered with a tool call)</span>'}</pre>
     <label style="display:block;font:600 10px var(--mono);letter-spacing:.1em;color:${r.pass?'var(--brand)':'var(--fail)'};margin-top:12px">JUDGE: ${r.pass?'PASS':'FAIL'} (confidence ${r.confidence??'n/a'})</label>
     <pre style="margin-top:6px">${esc(r.reason||'')}</pre>`;
   dlg.showModal()}

@@ -15,6 +15,7 @@ import time
 import json
 import random
 import hashlib
+import re
 
 import httpx
 
@@ -147,7 +148,8 @@ async def refresh_models():
 
 
 class ChatResult(dict):
-    """dict with keys: content, latency_ms, input_tokens, output_tokens, cost_usd, error"""
+    """dict with keys: content, tool_calls, latency_ms, input_tokens, output_tokens,
+    cost_usd, error"""
 
 
 def _estimate_cost(model: str, in_tok: int, out_tok: int) -> float:
@@ -177,6 +179,62 @@ def _extract_content(data: dict) -> str:
     return content or message.get("refusal") or ""
 
 
+def _extract_tool_calls(data: dict) -> list:
+    """Normalize OpenAI-shaped tool calls to [{"name": str, "arguments": dict}].
+
+    Providers differ in the details: `arguments` arrives as a JSON *string* in
+    the OpenAI format, some gateways hand back a dict already, and older models
+    use the singular `function_call`. A malformed argument blob is preserved as
+    a raw string rather than dropped, so the assertion layer can report exactly
+    what the model produced.
+    """
+    choices = data.get("choices") or []
+    if not choices:
+        return []
+    message = choices[0].get("message") or {}
+    raw = message.get("tool_calls")
+    if not raw and message.get("function_call"):
+        raw = [{"function": message["function_call"]}]
+    calls = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        fn = item.get("function") if isinstance(item.get("function"), dict) else item
+        name = fn.get("name")
+        if not name:
+            continue
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args) if args.strip() else {}
+            except json.JSONDecodeError:
+                args = {"__unparsed__": args[:500]}
+        calls.append({"name": str(name), "arguments": args if isinstance(args, dict) else {}})
+    return calls
+
+
+def as_openai_tools(tools: list) -> list:
+    """Convert a suite's plain tool definitions to the OpenAI `tools` payload.
+
+    Suites declare tools in a flat, readable form (name/description/parameters);
+    the wire format nests that under {"type": "function", "function": {...}}.
+    Already-wrapped definitions are passed through untouched.
+    """
+    payload = []
+    for t in tools or []:
+        if not isinstance(t, dict):
+            continue
+        if t.get("type") == "function" and isinstance(t.get("function"), dict):
+            payload.append(t)
+            continue
+        payload.append({"type": "function", "function": {
+            "name": t.get("name", ""),
+            "description": t.get("description", ""),
+            "parameters": t.get("parameters") or {"type": "object", "properties": {}},
+        }})
+    return payload
+
+
 async def _post_chat(payload: dict, timeout: float) -> dict:
     r = await _client().post(
         f"{MESH_BASE_URL}/chat/completions",
@@ -200,9 +258,10 @@ async def _post_chat(payload: dict, timeout: float) -> dict:
 
 
 async def chat(model: str, messages: list, json_mode: bool = False,
-               timeout: float = 45.0, label: str = "call") -> ChatResult:
+               timeout: float = 45.0, label: str = "call",
+               tools: list | None = None) -> ChatResult:
     if MOCK:
-        return await _mock_chat(model, messages, json_mode, label)
+        return await _mock_chat(model, messages, json_mode, label, tools)
 
     # `user` labels each request in MeshAPI's dashboard logs so test, judge,
     # fix, and red-team traffic are distinguishable instead of looking like
@@ -210,6 +269,11 @@ async def chat(model: str, messages: list, json_mode: bool = False,
     payload = {"model": model, "messages": messages, "user": f"agentbench:{label}"}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+    if tools:
+        # `auto` lets the model decide whether to call a tool at all — which is
+        # exactly the behavior the tool_restraint category tests.
+        payload["tools"] = as_openai_tools(tools)
+        payload["tool_choice"] = "auto"
 
     t0 = time.perf_counter()
     last_error = "unknown error"
@@ -221,14 +285,16 @@ async def chat(model: str, messages: list, json_mode: bool = False,
             last_error = str(e)
         except Exception as e:
             # Non-transient (bad model id, auth, malformed body): fail fast.
-            return ChatResult(content="", latency_ms=int((time.perf_counter() - t0) * 1000),
+            return ChatResult(content="", tool_calls=[],
+                              latency_ms=int((time.perf_counter() - t0) * 1000),
                               input_tokens=0, output_tokens=0, cost_usd=0.0, error=str(e))
         if attempt + 1 < MAX_ATTEMPTS:
             # Exponential backoff with jitter so a fanned-out run does not
             # re-collide on the retry.
             await asyncio.sleep(RETRY_BASE_DELAY * (2 ** attempt) * random.uniform(0.8, 1.3))
     else:
-        return ChatResult(content="", latency_ms=int((time.perf_counter() - t0) * 1000),
+        return ChatResult(content="", tool_calls=[],
+                          latency_ms=int((time.perf_counter() - t0) * 1000),
                           input_tokens=0, output_tokens=0, cost_usd=0.0,
                           error=f"{last_error} (after {MAX_ATTEMPTS} attempts)")
 
@@ -238,13 +304,19 @@ async def chat(model: str, messages: list, json_mode: bool = False,
     out_tok = usage.get("completion_tokens") or 0
     # Prefer gateway-reported cost if MeshAPI exposes it, else estimate.
     cost = usage.get("cost_usd") or data.get("cost_usd") or _estimate_cost(model, in_tok, out_tok)
+    tool_calls = _extract_tool_calls(data)
     try:
         content = _extract_content(data)
     except ValueError as e:
-        return ChatResult(content="", latency_ms=latency_ms, input_tokens=in_tok,
-                          output_tokens=out_tok, cost_usd=cost, error=str(e))
-    return ChatResult(content=content, latency_ms=latency_ms, input_tokens=in_tok,
-                      output_tokens=out_tok, cost_usd=cost, error=None)
+        # A tool-calling turn legitimately has no text content, so an empty
+        # message is only an error when no tool was called either.
+        if not tool_calls:
+            return ChatResult(content="", tool_calls=[], latency_ms=latency_ms,
+                              input_tokens=in_tok, output_tokens=out_tok,
+                              cost_usd=cost, error=str(e))
+        content = ""
+    return ChatResult(content=content, tool_calls=tool_calls, latency_ms=latency_ms,
+                      input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost, error=None)
 
 
 # ---------------------------------------------------------------- mock mode
@@ -335,9 +407,10 @@ def _mock_pass_probability(model: str) -> float:
 
 
 async def _mock_chat(model: str, messages: list, json_mode: bool,
-                     label: str = "call") -> ChatResult:
+                     label: str = "call", tools: list | None = None) -> ChatResult:
     await asyncio.sleep(random.uniform(0.15, 0.6))
     last = messages[-1]["content"]
+    tool_calls = []
 
     if json_mode:
         # Judge call. `label` carries the category ("judge:conciseness"), so the
@@ -353,6 +426,11 @@ async def _mock_chat(model: str, messages: list, json_mode: bool,
             "reason": "Response satisfies the rubric." if passed
                       else "Response violates the rubric (guessed / leaked / hostile / fabricated).",
         })
+    elif tools and "[tool_test]" in last:
+        # Only tool-category tests are answered with a tool call. A behavior test
+        # in a tools suite still gets its canned good/bad text, exactly as it
+        # would in a suite with no tools declared.
+        content, tool_calls = _mock_tool_turn(model, last, tools)
     else:
         # Pick good/bad canned answer by seeded coin flip per (model, input).
         cat = None
@@ -366,6 +444,49 @@ async def _mock_chat(model: str, messages: list, json_mode: bool,
         content = good if rng.random() < _mock_pass_probability(model) else bad
 
     in_tok, out_tok = len(last) // 4, len(content) // 4
-    return ChatResult(content=content, latency_ms=random.randint(300, 1800),
+    return ChatResult(content=content, tool_calls=tool_calls,
+                      latency_ms=random.randint(300, 1800),
                       input_tokens=in_tok, output_tokens=out_tok,
                       cost_usd=_estimate_cost(model, in_tok, out_tok), error=None)
+
+
+# The runner embeds the test's expectation in mock mode (see runner._mock_tag),
+# which lets the mock produce a *realistically wrong* tool call as often as the
+# model's seeded quality says it should — the same trick the canned good/bad
+# text answers use. None of these markers exist in live mode.
+_EXPECT_TOOL_RE = re.compile(r"\[expect_tool:([^\]]*)\]")
+_EXPECT_ARGS_RE = re.compile(r"\[expect_args:([^\]]*)\]")
+
+
+def _mock_tool_turn(model: str, prompt: str, tools: list) -> tuple:
+    """Simulate a tool-calling turn: right call, wrong call, or plain text."""
+    names = [t.get("name") for t in tools if isinstance(t, dict) and t.get("name")]
+    expect = _EXPECT_TOOL_RE.search(prompt)
+    expected = (expect.group(1) or "").strip() if expect else ""
+    args_match = _EXPECT_ARGS_RE.search(prompt)
+    try:
+        expected_args = json.loads(args_match.group(1)) if args_match else {}
+    except json.JSONDecodeError:
+        expected_args = {}
+
+    seed = int(hashlib.md5((model + prompt).encode()).hexdigest(), 16)
+    rng = random.Random(seed)
+    correct = rng.random() < _mock_pass_probability(model)
+
+    if not expected:  # restraint case: the right move is to answer directly
+        if correct:
+            return ("Our return window is 30 days from delivery — no tool needed for that.",
+                    [])
+        wrong = rng.choice(names) if names else "unknown_tool"
+        return ("", [{"name": wrong, "arguments": {}}])
+
+    if correct:
+        return "", [{"name": expected, "arguments": expected_args}]
+    # Wrong in one of two realistic ways: the wrong tool, or the right tool with
+    # a mangled argument.
+    others = [n for n in names if n != expected]
+    if others and rng.random() < 0.5:
+        return "", [{"name": rng.choice(others), "arguments": expected_args}]
+    broken = {k: (v[:-1] if isinstance(v, str) and len(v) > 1 else "???")
+              for k, v in expected_args.items()} or {"__missing__": True}
+    return "", [{"name": expected, "arguments": broken}]

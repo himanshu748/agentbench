@@ -212,9 +212,12 @@ class TestMockCoverage:
         bad = mesh_client._MOCK_BEHAVIOR[category][1]
         assert (await self._judge_verdict(category, bad))["pass"] is False
 
-    async def test_every_builtin_category_has_a_canned_pair(self):
+    async def test_every_judged_category_has_a_canned_pair(self):
+        """Tool categories are asserted in Python, so they carry no text pair;
+        every category that *is* judged by a model must have one."""
         from backend import judge
-        assert set(judge.CATEGORIES) == set(mesh_client._MOCK_BEHAVIOR)
+        judged = set(judge.CATEGORIES) - set(judge.TOOL_CATEGORIES)
+        assert judged == set(mesh_client._MOCK_BEHAVIOR)
 
     async def test_custom_rubrics_are_winnable_too(self):
         from backend import judge

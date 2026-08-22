@@ -116,11 +116,11 @@ class TestExecuteRun:
         calls = {"n": 0}
         real = runner._run_one
 
-        async def flaky(sem, prompt, test, model, attempt=0):
+        async def flaky(sem, prompt, test, model, attempt=0, tools=None):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise RuntimeError("cell exploded")
-            return await real(sem, prompt, test, model, attempt)
+            return await real(sem, prompt, test, model, attempt, tools)
 
         monkeypatch.setattr(runner, "_run_one", flaky)
         run = await runner.run_sync(make_suite(3), ["openai/gpt-4o-mini"])

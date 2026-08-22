@@ -68,7 +68,8 @@ def test_suite_count_is_advertised():
 
 
 def test_category_count_is_advertised():
-    assert len(judge.CATEGORIES) == 16
+    assert len(judge.CATEGORIES) == 19          # 16 judged + 3 tool-calling
+    assert len(judge.TOOL_CATEGORIES) == 3
 
 
 def test_new_domain_suites_are_present():

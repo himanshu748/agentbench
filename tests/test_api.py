@@ -246,11 +246,11 @@ class TestStreaming:
         real = runner._run_one
         calls = {"n": 0}
 
-        async def flaky(sem, prompt, test, model, attempt=0):
+        async def flaky(sem, prompt, test, model, attempt=0, tools=None):
             calls["n"] += 1
             if calls["n"] % 3 == 0:
                 raise RuntimeError("worker exploded")
-            return await real(sem, prompt, test, model, attempt)
+            return await real(sem, prompt, test, model, attempt, tools)
 
         monkeypatch.setattr(runner, "_run_one", flaky)
         with client.stream("GET", "/api/runs/stream",

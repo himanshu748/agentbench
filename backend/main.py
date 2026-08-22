@@ -24,6 +24,7 @@ MAX_PROMPT_CHARS = 20_000       # per system prompt / rubric
 MAX_YAML_CHARS = 200_000        # uploaded suite document
 MAX_USER_SUITES = 500           # bounded LRU: user-created suites live in memory
 MAX_REPEAT = 10                 # repeats per cell (flakiness detection)
+MAX_TOOLS_PER_SUITE = 20        # tool definitions a suite may declare
 RATE_LIMIT = 8                  # runs per window per IP (per warm instance)
 RATE_WINDOW = 600               # seconds
 _ip_hits: dict[str, list] = {}
@@ -167,7 +168,8 @@ def meta():
 @app.get("/api/suites")
 def list_suites():
     return [{"suite_id": s["suite_id"], "name": s.get("name"),
-             "num_tests": len(s.get("tests", []))} for s in SUITES.values()]
+             "num_tests": len(s.get("tests", [])),
+             "num_tools": len(s.get("tools") or [])} for s in SUITES.values()]
 
 
 @app.get("/api/suites/{suite_id}")
@@ -215,12 +217,63 @@ def _validate_suite(suite) -> dict:
         elif category not in judge.RUBRICS:
             raise ValueError(f"test {i}: unknown category '{category}' "
                              f"(known: {', '.join(judge.CATEGORIES)}, custom)")
+    tool_names = _validate_tools(suite.get("tools"))
+    for i, t in enumerate(tests, 1):
+        _validate_tool_expectations(i, t, tool_names)
     name = suite.get("name")
     if name is not None and not isinstance(name, str):
         raise ValueError("name must be a string")
-    return {"name": (name or "Untitled suite")[:120],
-            "system_prompt": prompt,
-            "tests": tests}
+    out = {"name": (name or "Untitled suite")[:120],
+           "system_prompt": prompt,
+           "tests": tests}
+    if suite.get("tools"):
+        out["tools"] = suite["tools"]
+    return out
+
+
+def _validate_tools(tools) -> set:
+    """Validate a suite's tool definitions; returns the set of declared names."""
+    if tools is None:
+        return set()
+    if not isinstance(tools, list) or not tools:
+        raise ValueError("tools must be a non-empty list when present")
+    if len(tools) > MAX_TOOLS_PER_SUITE:
+        raise ValueError(f"too many tools (max {MAX_TOOLS_PER_SUITE})")
+    names = set()
+    for i, t in enumerate(tools, 1):
+        if not isinstance(t, dict):
+            raise ValueError(f"tool {i}: must be a mapping")
+        name = t.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"tool {i}: needs a name")
+        if name in names:
+            raise ValueError(f"tool {i}: duplicate tool name '{name}'")
+        if not isinstance(t.get("description", ""), str):
+            raise ValueError(f"tool {i}: description must be a string")
+        params = t.get("parameters")
+        if params is not None and not isinstance(params, dict):
+            raise ValueError(f"tool {i}: parameters must be a JSON Schema object")
+        names.add(name)
+    return names
+
+
+def _validate_tool_expectations(i: int, test: dict, tool_names: set):
+    """A tool test is only meaningful if its expectation refers to a real tool."""
+    category = test.get("category")
+    expect = test.get("expect_tool")
+    if expect is not None and not isinstance(expect, str):
+        raise ValueError(f"test {i}: expect_tool must be a string")
+    if test.get("expect_args") is not None and not isinstance(test["expect_args"], dict):
+        raise ValueError(f"test {i}: expect_args must be a mapping")
+    if category in judge.TOOL_CATEGORIES and not tool_names:
+        raise ValueError(f"test {i}: category '{category}' needs the suite to declare tools")
+    if category in ("tool_selection", "tool_arguments") and not expect:
+        raise ValueError(f"test {i}: category '{category}' needs expect_tool")
+    if category == "tool_arguments" and not test.get("expect_args"):
+        raise ValueError(f"test {i}: category 'tool_arguments' needs expect_args")
+    if expect and expect not in tool_names:
+        raise ValueError(f"test {i}: expect_tool '{expect}' is not a declared tool "
+                         f"({', '.join(sorted(tool_names)) or 'none declared'})")
 
 
 @app.post("/api/suites")
@@ -338,7 +391,8 @@ async def stream_run(suite_id: str, models: str, request: Request):
             # on a cell that never arrives, hanging the stream until the client
             # or the platform times it out.
             try:
-                res = await runner._run_one(sem, suite["system_prompt"], test, model)
+                res = await runner._run_one(sem, suite["system_prompt"], test, model,
+                                            tools=suite.get("tools") or None)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
