@@ -1,0 +1,22 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the command or UI steps, what you expected, and what you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Suite / logs
+      description: A minimal suite YAML and any error output. Remove API keys.
+      render: shell
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "AgentBench 2.0.0, Python 3.12, Docker / local / GitHub Action, mock or live"

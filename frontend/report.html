@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentBench Report</title>
 <meta property="og:title" content="AgentBench benchmark report">
-<meta property="og:description" content="Judge-scored behavior test results across models via MeshAPI: pass rates, latency, and real cost per cell.">
+<meta property="og:description" content="Judge-scored behavior test results across models via OpenRouter: pass rates, latency, and real cost per cell.">
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -68,7 +68,7 @@ const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]
   const byKey={};run.results.forEach(x=>byKey[x.input+'|'+x.model]=x);
   const best=s.per_model.find(p=>p.model===s.recommended);
   let html=`<h1>${esc(run.suite_name||'Benchmark report')}</h1>
-    <div class="sub">run ${id} &middot; ${run.results.length} cells &middot; judged behavior via MeshAPI</div>
+    <div class="sub">run ${id} &middot; ${run.results.length} cells &middot; judged behavior via OpenRouter</div>
     <div class="reco"><span style="font-size:24px">&#127942;</span><div>
       Ship <b>${s.recommended}</b><br><span class="why">${esc(s.reason)}</span></div></div>
     <div style="overflow-x:auto"><table><tr><th style="min-width:200px">Test case</th>`+

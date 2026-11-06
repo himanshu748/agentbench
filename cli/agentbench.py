@@ -2,32 +2,84 @@
 """AgentBench CLI: run behavior test suites from the terminal or CI.
 
 Usage:
-  python agentbench.py run <suite.yaml> --models openai/gpt-4o-mini,anthropic/claude-haiku-4.5
-  python agentbench.py run customer-support --models auto        # built-in suite id
-  AGENTBENCH_URL=https://agentbench-three.vercel.app python agentbench.py run suite.yaml ...
+  agentbench run <suite.yaml> --models openai/gpt-4o-mini,anthropic/claude-haiku-4.5
+  agentbench run customer-support --models auto          # built-in suite id
+  agentbench run suite.yaml --models ... --local         # no server: run in-process
+
+By default the CLI talks to an AgentBench server at AGENTBENCH_URL
+(default http://localhost:8000). With --local it runs the backend in-process
+from a repo checkout, using OPENROUTER_API_KEY from the environment.
 
 Exit code 0 if every test passes on the recommended model, 1 otherwise
 (so a failing behavior test fails your CI job).
 """
 import argparse
+import asyncio
 import json
 import os
 import pathlib
 import sys
+import urllib.error
 import urllib.request
 
-BASE = os.environ.get("AGENTBENCH_URL", "https://agentbench-three.vercel.app").rstrip("/")
+DEFAULT_URL = "http://localhost:8000"
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 GREEN, RED, YELLOW, DIM, BOLD, END = "\033[92m", "\033[91m", "\033[93m", "\033[2m", "\033[1m", "\033[0m"
 
 
-def api(path, payload=None):
-    req = urllib.request.Request(BASE + path,
-                                 data=json.dumps(payload).encode() if payload else None,
-                                 headers={"Content-Type": "application/json"},
-                                 method="POST" if payload else "GET")
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.load(r)
+class HttpApi:
+    def __init__(self, base: str):
+        self.base = base.rstrip("/")
+        self.label = self.base
+
+    def __call__(self, path, payload=None):
+        req = urllib.request.Request(self.base + path,
+                                     data=json.dumps(payload).encode() if payload else None,
+                                     headers={"Content-Type": "application/json"},
+                                     method="POST" if payload else "GET")
+        try:
+            with urllib.request.urlopen(req, timeout=600) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            sys.exit(f"{RED}error{END} {e.code} from {self.base}{path}: {_detail(e.read())}")
+        except urllib.error.URLError as e:
+            sys.exit(f"{RED}error{END} cannot reach AgentBench at {self.base} ({e.reason}).\n"
+                     f"Start a server (uvicorn backend.main:app) or use --local.")
+
+
+class LocalApi:
+    """Runs the FastAPI app in-process; needs a repo checkout and requirements.txt."""
+
+    def __init__(self):
+        sys.path.insert(0, str(REPO_ROOT))
+        os.environ.setdefault("AGENTBENCH_DB", "")  # CI runs don't need persisted reports
+        try:
+            import httpx
+            from backend import llm_client
+            from backend.main import app
+        except ImportError as e:
+            sys.exit(f"{RED}error{END} --local needs a checkout of the AgentBench repo with "
+                     f"requirements.txt installed ({e}).")
+        self.loop = asyncio.new_event_loop()
+        self.loop.run_until_complete(llm_client.refresh_models())
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                        base_url="http://agentbench.local", timeout=None)
+        self.label = "local"
+
+    def __call__(self, path, payload=None):
+        req = self.client.post(path, json=payload) if payload else self.client.get(path)
+        r = self.loop.run_until_complete(req)
+        if r.status_code >= 400:
+            sys.exit(f"{RED}error{END} {r.status_code} {path}: {_detail(r.content)}")
+        return r.json()
+
+
+def _detail(body: bytes) -> str:
+    try:
+        return json.loads(body).get("detail", body.decode(errors="replace"))
+    except Exception:
+        return body.decode(errors="replace")[:300]
 
 
 def main():
@@ -35,9 +87,13 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     runp = sub.add_parser("run", help="run a suite")
     runp.add_argument("suite", help="path to suite YAML or a built-in suite id")
-    runp.add_argument("--models", required=True, help="comma-separated MeshAPI model ids (or auto)")
+    runp.add_argument("--models", required=True, help="comma-separated OpenRouter model ids (or auto)")
+    runp.add_argument("--local", action="store_true",
+                      help="run the backend in-process instead of calling a server")
     runp.add_argument("--json", action="store_true", help="print full JSON report")
     args = ap.parse_args()
+
+    api = LocalApi() if args.local else HttpApi(os.environ.get("AGENTBENCH_URL", DEFAULT_URL))
 
     path = pathlib.Path(args.suite)
     if path.exists():
@@ -45,13 +101,15 @@ def main():
     else:
         suite_id = args.suite
 
-    models = args.models.split(",")
-    print(f"{DIM}agentbench · {BASE} · {len(models)} model(s){END}")
+    models = [m.strip() for m in args.models.split(",") if m.strip()]
+    print(f"{DIM}agentbench · {api.label} · {len(models)} model(s){END}", file=sys.stderr)
     run = api("/api/runs", {"suite_id": suite_id, "models": models, "sync": True})
 
     if args.json:
         print(json.dumps(run, indent=2))
     else:
+        if run.get("mock"):
+            print(f"{YELLOW}MOCK MODE: no OPENROUTER_API_KEY on the server, results are canned.{END}")
         width = max(len(r["category"]) for r in run["results"]) + 2
         for m in run["models"]:
             print(f"\n{BOLD}{m}{END}")

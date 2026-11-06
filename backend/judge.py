@@ -1,12 +1,12 @@
 """Judge engine: one rubric per built-in behavior category.
 
-Each judge call routes through mesh_client.chat() with json_mode=True and is
+Each judge call routes through llm_client.chat() with json_mode=True and is
 parsed defensively into {pass, confidence, reason}.
 """
 import json
 import re
 
-from . import mesh_client
+from . import llm_client
 
 RUBRICS = {
     "requires_clarification": (
@@ -81,7 +81,7 @@ def _parse_verdict(text: str) -> dict:
 
 
 async def judge(category: str, test_input: str, response: str,
-                judge_model: str = mesh_client.DEFAULT_JUDGE_MODEL,
+                judge_model: str = llm_client.DEFAULT_JUDGE_MODEL,
                 custom_rubric: str | None = None) -> dict:
     # category "custom" uses the rubric supplied by the test case itself
     rubric = custom_rubric if category == "custom" and custom_rubric else RUBRICS.get(category)
@@ -94,7 +94,7 @@ async def judge(category: str, test_input: str, response: str,
         f"--- ASSISTANT RESPONSE UNDER TEST ---\n{response}\n\n"
         "Does the response PASS the rubric? JSON only."
     )
-    result = await mesh_client.chat(
+    result = await llm_client.chat(
         judge_model,
         [{"role": "system", "content": JUDGE_SYSTEM},
          {"role": "user", "content": user_msg}],
@@ -108,13 +108,13 @@ async def judge(category: str, test_input: str, response: str,
 
 
 async def suggest_fix(system_prompt: str, failures: list,
-                      model: str = mesh_client.DEFAULT_JUDGE_MODEL) -> str:
+                      model: str = llm_client.DEFAULT_JUDGE_MODEL) -> str | None:
     """P1: propose a revised system prompt addressing the failing cases."""
     fail_desc = "\n".join(
         f"- input: {f['input']!r} | category: {f['category']} | reason: {f['reason']}"
         for f in failures
     )
-    result = await mesh_client.chat(model, [
+    result = await llm_client.chat(model, [
         {"role": "system", "content":
          "You are a prompt engineer. Given a system prompt and its failing test cases, "
          "return ONLY the revised system prompt text, no commentary."},
@@ -122,4 +122,4 @@ async def suggest_fix(system_prompt: str, failures: list,
          f"Current system prompt:\n{system_prompt}\n\nFailing cases:\n{fail_desc}\n\n"
          "Rewrite the system prompt to fix these failures while keeping its original purpose."},
     ], label="fix")
-    return result["content"] if not result["error"] else f"(fix suggestion failed: {result['error']})"
+    return None if result["error"] else result["content"]
