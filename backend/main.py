@@ -179,30 +179,68 @@ async def stream_run(suite_id: str, models: str, request: Request):
             async with sem:
                 await worker(test, model)
 
-        tasks = [asyncio.create_task(bounded(t, m))
-                 for t in suite["tests"] for m in model_list]
-        results = []
-        for _ in range(total):
-            res = await queue.get()
-            results.append(res)
-            yield f"event: cell\ndata: {json.dumps(res)}\n\n"
-        await asyncio.gather(*tasks)
+        async def watch_disconnect():
+            while not await request.is_disconnected():
+                await asyncio.sleep(0.1)
 
-        summary = runner._recommend(results, model_list)
-        fix = None
-        failures = [r for r in results if not r["pass"] and r["status"] != "error"]
-        if failures:
-            fix = await judge.suggest_fix(
-                suite["system_prompt"],
-                [{"input": f["input"], "category": f["category"], "reason": f["reason"]}
-                 for f in failures[:8]])
-        done = {"run_id": uuid.uuid4().hex[:12], "status": "done",
-                "suite_name": suite.get("name"), "models": model_list,
-                "results": results, "summary": summary, "suggested_prompt": fix,
-                "mock": llm_client.MOCK}
-        runner.RUNS[done["run_id"]] = done
-        await storage.save_run(done)
-        yield f"event: done\ndata: {json.dumps(done)}\n\n"
+        disconnected = asyncio.create_task(watch_disconnect())
+
+        async def until_disconnect(awaitable):
+            pending = asyncio.ensure_future(awaitable)
+            try:
+                finished, _ = await asyncio.wait((pending, disconnected), return_when=asyncio.FIRST_COMPLETED)
+                if disconnected in finished:
+                    await disconnected
+                    return None
+                return await pending
+            finally:
+                if not pending.done():
+                    pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
+        tasks = []
+        try:
+            if await request.is_disconnected():
+                return
+            tasks = [asyncio.create_task(bounded(t, m))
+                     for t in suite["tests"] for m in model_list]
+            results = []
+            for _ in range(total):
+                res = await until_disconnect(queue.get())
+                if res is None or await request.is_disconnected():
+                    return
+                results.append(res)
+                yield f"event: cell\ndata: {json.dumps(res)}\n\n"
+            await asyncio.gather(*tasks)
+
+            if await request.is_disconnected():
+                return
+            summary = runner._recommend(results, model_list)
+            fix = None
+            failures = [r for r in results if not r["pass"] and r["status"] != "error"]
+            if failures:
+                fix = await until_disconnect(judge.suggest_fix(
+                    suite["system_prompt"],
+                    [{"input": f["input"], "category": f["category"], "reason": f["reason"]}
+                     for f in failures[:8]]))
+            if disconnected.done():
+                await disconnected
+                return
+            if await request.is_disconnected():
+                return
+            done = {"run_id": uuid.uuid4().hex[:12], "status": "done",
+                    "suite_name": suite.get("name"), "models": model_list,
+                    "results": results, "summary": summary, "suggested_prompt": fix,
+                    "mock": llm_client.MOCK}
+            await storage.save_run(done)
+            runner.RUNS[done["run_id"]] = done
+            yield f"event: done\ndata: {json.dumps(done)}\n\n"
+        finally:
+            disconnected.cancel()
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(disconnected, *tasks, return_exceptions=True)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
