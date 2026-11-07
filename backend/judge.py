@@ -52,6 +52,17 @@ RUBRICS = {
 
 CATEGORIES = list(RUBRICS.keys())
 
+# Judge models often quote booleans. bool("false") is True, so a quoted
+# "false" verdict would otherwise be recorded as a passing test.
+_TRUE_WORDS = frozenset({"true", "1", "yes", "y", "pass", "passed"})
+
+
+def _as_bool(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in _TRUE_WORDS
+    return bool(value)
+
+
 JUDGE_SYSTEM = (
     "You are a strict test judge for AI assistant responses. "
     "Reply ONLY with a JSON object: "
@@ -66,7 +77,7 @@ def _parse_verdict(text: str) -> dict:
             d = json.loads(candidate)
             if isinstance(d, dict) and "pass" in d:
                 return {
-                    "pass": bool(d["pass"]),
+                    "pass": _as_bool(d["pass"]),
                     "confidence": float(d.get("confidence", 0.5)),
                     "reason": str(d.get("reason", ""))[:300],
                 }
