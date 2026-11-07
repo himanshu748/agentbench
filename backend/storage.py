@@ -1,20 +1,45 @@
-"""Shared report persistence (Supabase REST, anon key + RLS).
+"""Run report persistence in a local SQLite file, so /r/<run_id> links survive restarts.
 
-The anon key is a publishable client key by design; the table only allows
-insert and select through row level security policies.
+Config (env):
+  AGENTBENCH_DB  Path to the SQLite file (default data/agentbench.db in the repo
+                 root). Set to an empty string to disable persistence.
 """
+import asyncio
+import json
 import os
+import pathlib
+import sqlite3
 
-import httpx
+from . import llm_client  # noqa: F401  (ensures .env is loaded first)
 
-from . import mesh_client  # noqa: F401  (ensures .env is loaded first)
+_DEFAULT = pathlib.Path(__file__).resolve().parent.parent / "data" / "agentbench.db"
+DB_PATH = os.environ.get("AGENTBENCH_DB", str(_DEFAULT))
+ENABLED = bool(DB_PATH)
 
-SUPA_URL = os.environ.get("SUPA_URL", "")
-SUPA_KEY = os.environ.get("SUPA_KEY", "")
-ENABLED = bool(SUPA_URL and SUPA_KEY)
-TABLE = f"{SUPA_URL}/rest/v1/agentbench_runs"
-HEADERS = {"apikey": SUPA_KEY, "Authorization": f"Bearer {SUPA_KEY}",
-           "Content-Type": "application/json"}
+
+def _connect() -> sqlite3.Connection:
+    if DB_PATH != ":memory:":
+        pathlib.Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, suite_name TEXT, "
+                 "created_at TEXT DEFAULT CURRENT_TIMESTAMP, payload TEXT NOT NULL)")
+    return conn
+
+
+def _save(run: dict):
+    with _connect() as conn:
+        conn.execute("INSERT OR IGNORE INTO runs (id, suite_name, payload) VALUES (?, ?, ?)",
+                     (run["run_id"], run.get("suite_name"), json.dumps(run)))
+    conn.close()
+
+
+def _get(run_id: str) -> dict | None:
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT payload FROM runs WHERE id = ?", (run_id,)).fetchone()
+    finally:
+        conn.close()
+    return json.loads(row[0]) if row else None
 
 
 async def save_run(run: dict):
@@ -22,10 +47,7 @@ async def save_run(run: dict):
     if not ENABLED:
         return
     try:
-        async with httpx.AsyncClient(timeout=8) as c:
-            await c.post(TABLE, headers={**HEADERS, "Prefer": "resolution=ignore-duplicates"},
-                         json={"id": run["run_id"], "suite_name": run.get("suite_name"),
-                               "payload": run})
+        await asyncio.to_thread(_save, run)
     except Exception:
         pass
 
@@ -34,10 +56,6 @@ async def get_run(run_id: str) -> dict | None:
     if not ENABLED:
         return None
     try:
-        async with httpx.AsyncClient(timeout=8) as c:
-            r = await c.get(TABLE, headers=HEADERS,
-                            params={"id": f"eq.{run_id}", "select": "payload"})
-            rows = r.json()
-            return rows[0]["payload"] if rows else None
+        return await asyncio.to_thread(_get, run_id)
     except Exception:
         return None

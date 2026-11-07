@@ -1,112 +1,94 @@
 # AgentBench
 
-**CI/CD for AI prompts and agents.** Behavior tests for your prompt, run across the models on MeshAPI, with pass rates, real cost, latency, a fix for what fails, and a build-style badge.
+[![CI](https://github.com/himanshu748/agentbench/actions/workflows/ci.yml/badge.svg)](https://github.com/himanshu748/agentbench/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2BE58A.svg)](LICENSE)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-6FA8FF.svg)
 
-Live: **https://agentbench-three.vercel.app** &middot; Built for the MeshAPI Hackathon (July 2026)
+**CI/CD for AI prompts and agents.** Write behavior tests for your prompt, run them across hundreds of models via [OpenRouter](https://openrouter.ai), and get pass rates, real cost, latency, a suggested fix for whatever fails, and a build-style badge.
 
-Every LLM call (test execution, judge scoring, red team generation, prompt fixes) routes through MeshAPI via one integration point: [backend/mesh_client.py](backend/mesh_client.py).
+Open source and self-hosted: bring your own OpenRouter key, run it on your laptop, in Docker, or inside your GitHub Actions job.
+
+> **Note:** The hosted demo (`agentbench-three.vercel.app`) is retired, and the MeshAPI integration has been replaced by OpenRouter. If you're upgrading from 1.x, see the [changelog](CHANGELOG.md).
 
 ## Why
 
-LLM output is non-deterministic, so exact-match testing is dead. AgentBench tags each test with a **behavior category** and a judge model (claude-sonnet-5, via MeshAPI) scores every response against that category's rubric.
+LLM output changes on every call, so exact-match testing can't work. AgentBench tags each test with a **behavior category**, and a judge model (default `anthropic/claude-sonnet-5`) scores every response against that category's rubric.
 
 Built-in categories: `requires_clarification`, `injection_resistance`, `conciseness`, `tone_deescalation`, `no_fabrication`, `format_compliance`, `language_match`, `pii_refusal`, plus `custom` with your own plain-English rubric per test.
+
+## Quickstart
+
+```bash
+git clone https://github.com/himanshu748/agentbench && cd agentbench
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env            # then set OPENROUTER_API_KEY (https://openrouter.ai/keys)
+uvicorn backend.main:app --port 8000
+```
+
+Open http://localhost:8000. Without a key the app runs in **mock mode**, using deterministic canned responses so you can try the whole flow offline.
+
+### Docker
+
+```bash
+docker build -t agentbench .
+docker run -p 8000:8000 -e OPENROUTER_API_KEY=sk-or-... -v agentbench-data:/data agentbench
+```
 
 ## Features
 
 - **Live streaming runs**: cells fill in one by one over SSE as each model responds and is judged.
-- **Fix and re-run**: failing runs get an AI-drafted prompt fix, one click re-benchmarks it, before/after shown.
-- **Red team generator**: paste a system prompt, get an adversarial suite written and runnable in seconds.
-- **Benchmark MeshAPI `auto`**: test smart routing against fixed models on your own workload.
-- **Shareable reports**: every run persists (Supabase) at `/r/<run_id>`.
+- **Any OpenRouter model**: the console shows a curated list; the API and CLI accept any OpenRouter model ID. Include `auto` to benchmark [OpenRouter's auto router](https://openrouter.ai/openrouter/auto) against fixed models.
+- **Real cost**: each cell uses the cost OpenRouter reports for that call, with the live `/models` pricing as a fallback.
+- **Fix and re-run**: failing runs get an AI-drafted prompt fix. One click re-runs the benchmark with it and shows before and after.
+- **Red team generator**: paste a system prompt and get an adversarial suite written and ready to run in seconds.
+- **Shareable reports** at `/r/<run_id>`, persisted to a local SQLite file.
 - **Regression history** per suite with pass-rate deltas.
 - **Quality gate badge**: CI-style SVG per run with copyable README markdown.
-- **7 pre-built suites**, 8 tests each covering every built-in category: customer support, coding assistant, content moderator, healthcare triage, sales email, HR policy, plus a brand voice suite showcasing custom rubrics.
-- **Suite builder UI**: create tests in the console with a form (category dropdown, inline rubric editor for custom tests). No YAML needed.
+- **7 pre-built suites** with 8 tests each: customer support, coding assistant, content moderator, healthcare triage, sales email, HR policy, and a brand voice suite with custom rubrics.
+- **Suite builder UI**: build tests in a form, no YAML needed.
 
-## CLI and GitHub Action
+## CLI
 
 ```bash
-pipx install "git+https://github.com/himanshu748/agentbench"   # or: pip install ...
+pipx install "git+https://github.com/himanshu748/agentbench"
 
-agentbench run suites/customer-support.yaml \
+# against a running AgentBench server (default http://localhost:8000)
+AGENTBENCH_URL=http://localhost:8000 agentbench run suites/customer-support.yaml \
   --models openai/gpt-4o-mini,anthropic/claude-haiku-4.5
-# exit code 1 if the recommended model fails any test -> fails your CI job
-# point at your own server with AGENTBENCH_URL=http://localhost:8000
+
+# or with no server at all, from a repo checkout
+OPENROUTER_API_KEY=sk-or-... python cli/agentbench.py run suites/customer-support.yaml \
+  --models openai/gpt-4o-mini,anthropic/claude-haiku-4.5 --local
 ```
+
+Exits `1` if the recommended model fails any test, so it fails your CI job. `--json` prints the full report, including the suggested prompt fix.
+
+## GitHub Action
+
+1. Add an `OPENROUTER_API_KEY` repository secret. A key with a [credit limit](https://openrouter.ai/settings/keys) is a good idea.
+2. Add a suite YAML to your repo (format below).
+3. Create `.github/workflows/prompt-ci.yml`:
 
 ```yaml
-# .github/workflows/prompt-ci.yml
-- uses: himanshu748/agentbench@v1
-  with:
-    suite: suites/customer-support.yaml
-    models: openai/gpt-4o-mini,anthropic/claude-haiku-4.5
+name: Prompt CI
+on: pull_request
+
+jobs:
+  agentbench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: himanshu748/agentbench@v2
+        with:
+          suite: suites/customer-support.yaml
+          models: openai/gpt-4o-mini,anthropic/claude-haiku-4.5
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          # judge-model: anthropic/claude-sonnet-5
+          # url: https://agentbench.internal.example.com   # use your own server instead
 ```
 
-### Setup in your own repo
-
-1. Add a suite YAML somewhere in your repo (e.g. `suites/customer-support.yaml`), using the format below.
-2. Create `.github/workflows/prompt-ci.yml`:
-   ```yaml
-   name: Prompt CI
-   on: pull_request
-
-   jobs:
-     agentbench:
-       runs-on: ubuntu-latest
-       steps:
-         - uses: actions/checkout@v4
-         - uses: himanshu748/agentbench@v1
-           with:
-             suite: suites/customer-support.yaml
-             models: openai/gpt-4o-mini,anthropic/claude-haiku-4.5
-   ```
-3. Push. No secrets needed — the Action calls the hosted `agentbench-three.vercel.app` backend by default, which already holds the MeshAPI key. Every PR that touches your trigger path now runs the suite and fails the check (blocking merge) if the recommended model fails a test.
-
-   Only add a `url:` input (pointing at your own deployment) if you're self-hosting the backend — in that case, your deployment needs its own `MESH_API_KEY`.
-
-## How the CI/CD gate actually works
-
-There's no magic running inside GitHub's runner — it's a thin client hitting a server:
-
-```
-GitHub Actions runner (or your laptop)
-        │
-        │ runs: python cli/agentbench.py run suite.yaml --models ...
-        ▼
-cli/agentbench.py ── HTTP POST ──► AGENTBENCH_URL
-                                     (defaults to the hosted
-                                      agentbench-three.vercel.app,
-                                      or your own `uvicorn` instance)
-                                            │
-                                    FastAPI backend does the real work:
-                                    calls MeshAPI for each model, scores
-                                    every response with the judge model
-                                            │
-                                    returns JSON: pass/fail per test,
-                                    cost, latency, a recommendation
-        ◄────────────────────────────────────┘
-CLI prints a pass/fail table and exits 1 if the recommended
-model failed any test -> that non-zero exit fails your CI job.
-```
-
-`action.yml` just checks out your repo and runs that same CLI script — so anywhere the CLI works, the Action works.
-
-**Try it locally without touching GitHub:**
-
-```bash
-# against the hosted server (default) — no setup needed
-python3 cli/agentbench.py run suites/customer-support.yaml \
-  --models openai/gpt-4o-mini,anthropic/claude-haiku-4.5
-# echo $? -> 0 if the recommended model passed everything, 1 if not
-
-# against your own backend, e.g. to test a suite before pushing
-uvicorn backend.main:app --port 8000 &
-AGENTBENCH_URL=http://localhost:8000 python3 cli/agentbench.py run \
-  suites/customer-support.yaml --models openai/gpt-4o-mini
-```
-
-Custom rubric tests and the red-team generator use this same backend, not a CLI-only path — `POST /api/suites` validates and stores a custom-rubric suite, `POST /api/redteam` asks the judge model to write adversarial tests for your system prompt. Both work identically whether you're hitting the hosted server or your own local one; the CLI/Action only ever talks to whatever suite_id or YAML you give it.
+The Action installs AgentBench in the runner and runs the engine in-process (`--local`), so your prompts and key never leave your job except to reach OpenRouter. Every PR that triggers the workflow runs the suite, and the check fails if the recommended model fails a test.
 
 ## Suite format
 
@@ -121,22 +103,64 @@ tests:
     rubric: "PASS only if the response is valid JSON with no surrounding prose."
 ```
 
-## Run locally
+## Configuration
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-echo "MESH_API_KEY=rsk_..." > .env         # from meshapi.ai
-uvicorn backend.main:app --port 8000       # open http://localhost:8000
+All settings are environment variables. You can also put them in `.env`; see [.env.example](.env.example).
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | _(unset = mock mode)_ | OpenRouter key used for every model call |
+| `AGENTBENCH_JUDGE_MODEL` | `anthropic/claude-sonnet-5` | Judge, red-team, and prompt-fix model |
+| `AGENTBENCH_MODELS` | curated list | Comma-separated models shown in the console |
+| `AGENTBENCH_DB` | `data/agentbench.db` | SQLite report store; empty string disables it |
+| `AGENTBENCH_RATE_LIMIT` | `0` (off) | Runs per IP per 10 minutes |
+| `AGENTBENCH_MAX_CELLS` | `40` | Max tests × models per run |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Any gateway with the same API shape |
+| `AGENTBENCH_URL` | `http://localhost:8000` | Server the CLI talks to (without `--local`) |
+
+The server has no built-in auth. If you share an instance, put it behind your own auth and set the rate limit (see [SECURITY.md](SECURITY.md)).
+
+## How it works
+
+```
+CLI / GitHub Action / browser
+        │
+        ▼
+FastAPI backend (backend/main.py)
+  runner.py   runs every test × model concurrently
+  judge.py    scores each response against its category rubric
+  llm_client.py ── the only module that calls a model provider ──► OpenRouter
+  storage.py  persists reports to SQLite
+        │
+        ▼
+pass/fail per test, cost, latency, recommendation
+(the cheapest model that passes the most tests), suggested prompt fix
 ```
 
-No key? Mock mode keeps the whole flow demoable offline.
+- `llm_client.py`: OpenAI-compatible chat calls, model catalog, and pricing from OpenRouter `/models`, plus mock mode.
+- `judge.py`: category rubrics, JSON-mode judging with tolerant parsing, prompt-fix generation.
+- `runner.py`: concurrent execution, per-cell error isolation, recommendation by pass count, then cost, then latency.
+- `frontend/`: static landing page, console, and report page served by the same app.
 
-## Architecture
+## API
 
-- FastAPI, one Vercel Python serverless function (`api/index.py`), static frontend served by the same app.
-- `mesh_client.py`: the only file that talks to MeshAPI. Model catalog and per-token pricing pulled live from `/v1/models` (531 models, 396 chat).
-- `judge.py`: category rubrics, JSON-mode judging, prompt-fix generation.
-- `runner.py`: concurrent execution, per-cell timeout isolation, recommendation (pass rate, then cost, then latency).
-- `storage.py`: shared reports in Supabase (RLS-guarded anon key).
-- Abuse guards: per-IP rate limiting, 40-cell run ceiling, spend-capped MeshAPI key.
+| Method | Path | |
+| --- | --- | --- |
+| `GET` | `/api/meta` | Models, categories, judge model, catalog size, mock flag |
+| `GET` | `/api/suites`, `/api/suites/{id}` | List or read suites |
+| `POST` | `/api/suites` | Create a suite from `{"yaml_text": ...}` |
+| `POST` | `/api/runs` | Run `{"suite_id", "models", "sync"}` |
+| `GET` | `/api/runs/stream?suite_id=&models=` | SSE run: `start`, `cell`…, `done` |
+| `GET` | `/api/shared/{run_id}` | Stored report |
+| `POST` | `/api/fix-rerun` | Re-run with a fixed system prompt |
+| `POST` | `/api/redteam` | Generate an adversarial suite for a system prompt |
+| `GET` | `/api/badge.svg?passed=&total=` | Quality gate badge |
+| `GET` | `/api/health` | Liveness |
+
+## Contributing
+
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Run `ruff check .` and `pytest` before opening one; tests use mock mode and never spend credits.
+
+## License
+
+[MIT](LICENSE) © Himanshu Jha

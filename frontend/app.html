@@ -209,7 +209,7 @@ dialog pre{white-space:pre-wrap;font:12px var(--mono);background:var(--raised);p
   <span class="crumb">/ console</span>
   <div class="navr">
     <span class="judgechip" id="judgechip">judge: <i>...</i></span>
-    <span class="mockbadge" id="mockbadge">MOCK MODE, set MESH_API_KEY</span>
+    <span class="mockbadge" id="mockbadge">MOCK MODE, set OPENROUTER_API_KEY</span>
     <a class="backlink" href="/">&#8592; Landing</a>
   </div>
 </div></nav>
@@ -238,9 +238,9 @@ dialog pre{white-space:pre-wrap;font:12px var(--mono);background:var(--raised);p
       </details>
     </div>
     <div class="panel" style="margin-top:20px">
-      <h2><span class="num">2</span>Models via MeshAPI</h2>
+      <h2><span class="num">2</span>Models via OpenRouter</h2>
       <div id="models"></div>
-      <div class="count" id="selcount">Pick up to 4 models. <i>auto</i> is MeshAPI smart routing.</div>
+      <div class="count" id="selcount">Pick up to 4 models. <i>auto</i> is OpenRouter's auto router.</div>
       <button class="run" id="runbtn" onclick="startRun()" disabled>Run benchmark<span class="arr">&#8594;</span></button>
     </div>
     <div class="panel" id="histpanel" style="display:none;margin-top:20px">
@@ -253,7 +253,7 @@ dialog pre{white-space:pre-wrap;font:12px var(--mono);background:var(--raised);p
     <h2><span class="num">3</span>Report</h2>
     <div class="empty">
       <div class="art">PASS / FAIL</div>
-      <p>Pick a suite and up to four models, then run. Every cell is judged behavior, real latency, and live MeshAPI pricing.</p>
+      <p>Pick a suite and up to four models, then run. Every cell is judged behavior, real latency, and live OpenRouter pricing.</p>
     </div>
   </div>
 </div></div>
@@ -276,7 +276,7 @@ async function init(){
   // group model chips by provider
   const groups={};
   meta.models.forEach(m=>{
-    const p=m==='auto'?'meshapi':m.split('/')[0];
+    const p=m==='auto'?'openrouter':m.split('/')[0];
     (groups[p]=groups[p]||[]).push(m)});
   $('models').innerHTML=Object.entries(groups).map(([p,ms])=>
     `<div class="prov">${p}</div><div class="models">`+
@@ -303,7 +303,7 @@ function toggleModel(m,el){
   if(selModels.has(m)){selModels.delete(m);el.classList.remove('sel')}
   else if(selModels.size<4){selModels.add(m);el.classList.add('sel')}
   $('selcount').innerHTML=selModels.size?`<i>${selModels.size}</i> of 4 selected`:
-    'Pick up to 4 models. <i>auto</i> is MeshAPI smart routing.';
+    'Pick up to 4 models. <i>auto</i> is OpenRouter\'s auto router.';
   updateBtn()}
 function updateBtn(){$('runbtn').disabled=!(selSuite&&selModels.size>=1)}
 
@@ -352,7 +352,7 @@ async function redteam(){
   catch(e){alert(e.message)}
   $('rtbtn').textContent='Generate attack suite';$('rtbtn').disabled=false}
 
-const PROG=['Dispatching tests through MeshAPI...','Models responding...',
+const PROG=['Dispatching tests through OpenRouter...','Models responding...',
   'Judge scoring each behavior...','Pricing from the live catalog...','Assembling the report...'];
 function showProgress(){
   $('report').innerHTML=`<h2><span class="num">3</span>Report</h2>

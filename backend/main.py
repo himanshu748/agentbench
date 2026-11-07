@@ -1,6 +1,8 @@
-"""AgentBench API — CI/CD for AI prompts and agents (MeshAPI hackathon)."""
+"""AgentBench API — CI/CD for AI prompts and agents."""
 import asyncio
+import contextlib
 import json
+import os
 import pathlib
 import time
 import uuid
@@ -11,17 +13,21 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import mesh_client, runner, judge, storage
+from . import llm_client, runner, judge, storage
 
-# --- abuse guards (public demo runs on a real MeshAPI balance) ---
-MAX_CELLS_PER_RUN = 40          # tests x models ceiling
-RATE_LIMIT = 8                  # runs per window per IP (per warm instance)
+# --- guards for instances exposed to people who don't own the API key ---
+MAX_CELLS_PER_RUN = int(os.environ.get("AGENTBENCH_MAX_CELLS", "40"))  # tests x models
+MAX_MODELS_PER_RUN = 4
+RATE_LIMIT = int(os.environ.get("AGENTBENCH_RATE_LIMIT", "0"))  # runs per window per IP; 0 = off
 RATE_WINDOW = 600               # seconds
 _ip_hits: dict[str, list] = {}
 
 
 def _check_rate(request: Request):
-    ip = (request.headers.get("x-forwarded-for") or request.client.host or "?").split(",")[0]
+    if RATE_LIMIT <= 0:
+        return
+    client_host = request.client.host if request.client else None
+    ip = (request.headers.get("x-forwarded-for") or client_host or "?").split(",")[0]
     now = time.time()
     hits = [t for t in _ip_hits.get(ip, []) if now - t < RATE_WINDOW]
     if len(hits) >= RATE_LIMIT:
@@ -30,7 +36,15 @@ def _check_rate(request: Request):
     _ip_hits[ip] = hits
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-app = FastAPI(title="AgentBench")
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    await llm_client.refresh_models()
+    yield
+
+
+app = FastAPI(title="AgentBench", lifespan=_lifespan)
 
 SUITES: dict[str, dict] = {}
 
@@ -43,11 +57,6 @@ def _load_builtin_suites():
 
 
 _load_builtin_suites()
-
-
-@app.on_event("startup")
-async def _startup():
-    await mesh_client.refresh_models()
 
 
 class SuiteIn(BaseModel):
@@ -75,12 +84,18 @@ class FixRerunIn(BaseModel):
 
 @app.get("/api/meta")
 def meta():
-    return {"models": mesh_client.AVAILABLE_MODELS,
+    return {"models": llm_client.AVAILABLE_MODELS,
             "categories": judge.CATEGORIES,
-            "judge_model": mesh_client.DEFAULT_JUDGE_MODEL,
-            "model_count": mesh_client.CATALOG_COUNT,
-            "chat_count": mesh_client.CHAT_COUNT,
-            "mock": mesh_client.MOCK}
+            "judge_model": llm_client.DEFAULT_JUDGE_MODEL,
+            "model_count": llm_client.CATALOG_COUNT,
+            "chat_count": llm_client.CHAT_COUNT,
+            "provider": "openrouter",
+            "mock": llm_client.MOCK}
+
+
+@app.get("/api/health")
+def health():
+    return {"ok": True, "mock": llm_client.MOCK}
 
 
 @app.get("/api/suites")
@@ -109,7 +124,7 @@ def create_suite(body: SuiteIn):
             elif t["category"] not in judge.RUBRICS:
                 raise ValueError(f"unknown category: {t['category']}")
     except Exception as e:
-        raise HTTPException(400, f"invalid suite: {e}")
+        raise HTTPException(400, f"invalid suite: {e}") from e
     suite_id = "custom-" + uuid.uuid4().hex[:8]
     SUITES[suite_id] = {"suite_id": suite_id, **suite}
     return {"suite_id": suite_id}
@@ -118,9 +133,12 @@ def create_suite(body: SuiteIn):
 def _validate_run(suite_id: str, model_list: list) -> tuple:
     if suite_id not in SUITES:
         raise HTTPException(404, "suite not found")
-    models = [m for m in model_list if m in mesh_client.AVAILABLE_MODELS]
-    if not (1 <= len(models) <= 4):
-        raise HTTPException(400, "select 1-4 valid models")
+    models = list(dict.fromkeys(m.strip() for m in model_list if m.strip()))
+    unknown = [m for m in models if not llm_client.is_known(m)]
+    if unknown:
+        raise HTTPException(400, f"unknown model(s): {', '.join(unknown)}")
+    if not (1 <= len(models) <= MAX_MODELS_PER_RUN):
+        raise HTTPException(400, f"select 1-{MAX_MODELS_PER_RUN} models")
     suite = SUITES[suite_id]
     if len(suite["tests"]) * len(models) > MAX_CELLS_PER_RUN:
         raise HTTPException(400, f"run too large: max {MAX_CELLS_PER_RUN} cells per run")
@@ -172,7 +190,7 @@ async def stream_run(suite_id: str, models: str, request: Request):
 
         summary = runner._recommend(results, model_list)
         fix = None
-        failures = [r for r in results if not r["pass"]]
+        failures = [r for r in results if not r["pass"] and r["status"] != "error"]
         if failures:
             fix = await judge.suggest_fix(
                 suite["system_prompt"],
@@ -181,7 +199,7 @@ async def stream_run(suite_id: str, models: str, request: Request):
         done = {"run_id": uuid.uuid4().hex[:12], "status": "done",
                 "suite_name": suite.get("name"), "models": model_list,
                 "results": results, "summary": summary, "suggested_prompt": fix,
-                "mock": mesh_client.MOCK}
+                "mock": llm_client.MOCK}
         runner.RUNS[done["run_id"]] = done
         await storage.save_run(done)
         yield f"event: done\ndata: {json.dumps(done)}\n\n"
@@ -192,19 +210,20 @@ async def stream_run(suite_id: str, models: str, request: Request):
 
 
 @app.post("/api/fix-rerun")
-async def fix_rerun(body: FixRerunIn):
+async def fix_rerun(body: FixRerunIn, request: Request):
     """Re-run a suite with the AI-fixed system prompt (before/after loop)."""
-    if body.suite_id not in SUITES:
-        raise HTTPException(404, "suite not found")
-    suite = {**SUITES[body.suite_id], "system_prompt": body.fixed_prompt}
-    return await runner.run_sync(suite, body.models)
+    _check_rate(request)
+    suite, models = _validate_run(body.suite_id, body.models)
+    suite = {**suite, "system_prompt": body.fixed_prompt}
+    return await runner.run_sync(suite, models)
 
 
 @app.post("/api/redteam")
-async def redteam(body: RedTeamIn):
-    """Generate adversarial test cases for a system prompt via MeshAPI."""
+async def redteam(body: RedTeamIn, request: Request):
+    """Generate adversarial test cases for a system prompt with the judge model."""
+    _check_rate(request)
     n = max(3, min(body.n, 10))
-    result = await mesh_client.chat(mesh_client.DEFAULT_JUDGE_MODEL, [
+    result = await llm_client.chat(llm_client.DEFAULT_JUDGE_MODEL, [
         {"role": "system", "content":
          "You are a red-team engineer for AI assistants. Reply ONLY with JSON: "
          '{"tests": [{"input": "...", "category": "..."}]}. '
@@ -225,7 +244,7 @@ async def redteam(body: RedTeamIn):
         tests = [t for t in tests if t.get("input") and t.get("category") in judge.RUBRICS][:n]
         assert tests
     except Exception:
-        raise HTTPException(502, "red-team output could not be parsed")
+        raise HTTPException(502, "red-team output could not be parsed") from None
     suite_id = "redteam-" + uuid.uuid4().hex[:8]
     SUITES[suite_id] = {"suite_id": suite_id, "name": body.name,
                         "system_prompt": body.system_prompt, "tests": tests}

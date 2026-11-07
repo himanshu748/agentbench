@@ -2,21 +2,21 @@
 import asyncio
 import uuid
 
-from . import mesh_client, judge
+from . import llm_client, judge
 
-RUNS: dict[str, dict] = {}  # in-memory store (hackathon scope)
+RUNS: dict[str, dict] = {}  # in-memory; completed runs are also persisted by storage.py
 
 CONCURRENCY = 6
 
 
 def _mock_tag(test: dict) -> str:
     # In mock mode the client needs the category hint embedded in the input.
-    return f"{test['input']}\n[category:{test['category']}]" if mesh_client.MOCK else test["input"]
+    return f"{test['input']}\n[category:{test['category']}]" if llm_client.MOCK else test["input"]
 
 
 async def _run_one(sem: asyncio.Semaphore, system_prompt: str, test: dict, model: str) -> dict:
     async with sem:
-        resp = await mesh_client.chat(model, [
+        resp = await llm_client.chat(model, [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": _mock_tag(test)},
         ], label=f"test:{test['category']}")
@@ -62,7 +62,7 @@ async def execute_run(run_id: str, suite: dict, models: list):
         run["summary"] = _recommend(run["results"], models)
 
         # P1: suggested prompt fix for failing cases (one call, strongest model)
-        failures = [r for r in run["results"] if not r["pass"]]
+        failures = [r for r in run["results"] if not r["pass"] and r["status"] != "error"]
         if failures:
             run["suggested_prompt"] = await judge.suggest_fix(
                 suite["system_prompt"],
@@ -79,7 +79,7 @@ def _new_run(suite: dict, models: list) -> str:
     RUNS[run_id] = {"run_id": run_id, "status": "running", "suite_name": suite.get("name"),
                     "system_prompt": suite.get("system_prompt"),
                     "models": models, "results": [], "summary": None,
-                    "suggested_prompt": None, "mock": mesh_client.MOCK}
+                    "suggested_prompt": None, "mock": llm_client.MOCK}
     return run_id
 
 

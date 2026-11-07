@@ -4,10 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentBench. The test suite your AI ships with.</title>
-<meta name="description" content="Behavior tests for prompts and agents, run across 500+ models on MeshAPI. Pass rates, real cost, latency, and a fix for what fails.">
+<meta name="description" content="Open source behavior tests for prompts and agents, run across hundreds of models via OpenRouter. Pass rates, real cost, latency, and a fix for what fails.">
 <meta property="og:title" content="AgentBench. Ship AI features with proof, not vibes.">
-<meta property="og:description" content="CI for AI behavior: judge-scored tests across 500+ MeshAPI models, live cost and latency, red team generation, and a fix-and-rerun loop.">
-<meta property="og:url" content="https://agentbench-three.vercel.app">
+<meta property="og:description" content="Open source CI for AI behavior: judge-scored tests across hundreds of OpenRouter models, live cost and latency, red team generation, and a fix-and-rerun loop.">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/logo.svg">
@@ -222,7 +221,7 @@ footer b{color:var(--brand);font-weight:600}
   <a class="logo" href="/"><img src="/static/logo.svg" alt="" style="width:22px;height:22px;border-radius:6px">AgentBench</a>
   <div class="links">
     <a href="#how">How it works</a><a href="#cases">Use cases</a>
-    <a href="#features">Features</a><a href="#mesh">MeshAPI</a>
+    <a href="#features">Features</a><a href="#oss">Self-host</a><a href="https://github.com/himanshu748/agentbench">GitHub</a>
   </div>
   <a class="cta" href="/app" style="margin-left:22px">Open the console</a>
 </div></nav>
@@ -231,7 +230,7 @@ footer b{color:var(--brand);font-weight:600}
   <div>
     <div class="kicker">CI for AI behavior</div>
     <h1 id="h1">Ship AI features with <em>proof</em>, not vibes.</h1>
-    <p class="sub">Your prompt is untested code. AgentBench runs it through <b>behavior tests</b> across the models on MeshAPI and returns pass rates, real cost per call, latency, and a <b>fix for whatever fails</b>. Before your users find it.</p>
+    <p class="sub">Your prompt is untested code. AgentBench runs it through <b>behavior tests</b> across hundreds of models via OpenRouter and returns pass rates, real cost per call, latency, and a <b>fix for whatever fails</b>. Before your users find it.</p>
     <div class="hero-ctas">
       <a class="cta big" href="/app">Run a benchmark<span class="arr">&#8594;</span></a>
       <a class="ghost" href="#how">See how it works</a>
@@ -253,7 +252,7 @@ footer b{color:var(--brand);font-weight:600}
 </div></header>
 
 <div class="stats"><div class="wrap">
-  <div class="stat rv"><b><i data-count="1000">0</i>+</b><span>LLMs on MeshAPI<br>
+  <div class="stat rv"><b><i data-count="300">0</i>+</b><span>LLMs via OpenRouter<br>
     <span style="font:11px var(--mono);color:var(--dim)" id="livecount"></span></span></div>
   <div class="stat rv d1"><b>&frac12;<span style="font-size:22px">&cent;</span></b><span>for a full benchmark run</span></div>
   <div class="stat rv d2"><b><i id="suitecount" data-count="7">0</i></b><span>ready-made use case suites</span></div>
@@ -268,9 +267,9 @@ footer b{color:var(--brand);font-weight:600}
     <div class="step rv"><div class="n">1</div><h3>Define tests in YAML</h3>
       <p>Each case is an input plus an expected behavior. Eight built-in categories, from <code>injection_resistance</code> to <code>pii_refusal</code> and <code>format_compliance</code>, plus <code>custom</code> with your own plain-English rubric. Or let the red team generator write the tests for you.</p></div>
     <div class="step rv d1"><div class="n">2</div><h3>Run across models</h3>
-      <p>Every test hits every model you pick, concurrently, through MeshAPI's unified endpoint. Include <code>auto</code> to benchmark MeshAPI's smart routing against fixed models. Timeouts become error cells. Nothing crashes a run.</p></div>
+      <p>Every test hits every model you pick, concurrently, through OpenRouter's unified endpoint. Include <code>auto</code> to benchmark OpenRouter's auto router against fixed models. Timeouts become error cells. Nothing crashes a run.</p></div>
     <div class="step rv d2"><div class="n">3</div><h3>Read the verdict</h3>
-      <p>A pass/fail grid with latency and cost per cell, priced from MeshAPI's live catalog. One clear call: the cheapest model that passes everything is the one you ship.</p></div>
+      <p>A pass/fail grid with latency and cost per cell, priced from OpenRouter's live catalog. One clear call: the cheapest model that passes everything is the one you ship.</p></div>
   </div>
 </div></section>
 
@@ -315,33 +314,33 @@ footer b{color:var(--brand);font-weight:600}
   </div>
 </div></section>
 
-<section class="mesh" id="mesh"><div class="wrap center">
-  <div class="sec-kicker rv">Built on MeshAPI</div>
-  <h2 class="rv">Every call routes through the gateway.</h2>
-  <p class="sec-sub rv">Test execution, judge scoring, red team generation, and prompt fixes: all of it is MeshAPI traffic. AgentBench leans on what the gateway actually provides.</p>
+<section class="mesh" id="oss"><div class="wrap center">
+  <div class="sec-kicker rv">Open source &middot; Self-hosted</div>
+  <h2 class="rv">Your key, your server, your prompts.</h2>
+  <p class="sec-sub rv">AgentBench is MIT licensed and runs wherever Python does. Test execution, judge scoring, red team generation, and prompt fixes all go through OpenRouter with your own key.</p>
   <div class="meshgrid" style="text-align:left">
-    <div class="mcap rv"><b>Unified endpoint</b><p>One OpenAI-compatible API for every provider. AgentBench has exactly one integration file: mesh_client.py.</p></div>
-    <div class="mcap rv d1"><b>Live pricing catalog</b><p>Cost per cell comes from MeshAPI's /models pricing feed at startup. Real numbers, not a hardcoded table.</p></div>
-    <div class="mcap rv d2"><b>Smart auto routing</b><p>MeshAPI can pick the model per request. AgentBench lets you benchmark auto against fixed models to see if it earns its keep.</p></div>
-    <div class="mcap rv d3"><b>Spend-capped keys</b><p>The demo runs on a Router Service Key with a spend cap, so a public deployment cannot burn the account.</p></div>
-    <div class="mcap rv d4"><b>Sub-100ms failover</b><p>If a provider goes down mid-run, MeshAPI reroutes. AgentBench marks anything that still fails as an error cell and keeps going.</p></div>
-    <div class="mcap rv d5"><b>Zero prompt storage</b><p>MeshAPI does not store prompts by default, so your test inputs and system prompts stay yours.</p></div>
+    <div class="mcap rv"><b>One integration file</b><p>OpenRouter's OpenAI-compatible API reaches every major provider. AgentBench talks to it from exactly one file: llm_client.py.</p></div>
+    <div class="mcap rv d1"><b>Real cost per cell</b><p>Cost comes from the usage OpenRouter reports on each call, with the live /models pricing feed as the fallback. Real numbers, not a hardcoded table.</p></div>
+    <div class="mcap rv d2"><b>Auto router benchmark</b><p>Include <code>auto</code> to test OpenRouter's auto router against fixed models and see if it earns its keep.</p></div>
+    <div class="mcap rv d3"><b>Runs in your CI</b><p>The GitHub Action runs the whole engine inside your job. No hosted service in the loop, just an OPENROUTER_API_KEY secret.</p></div>
+    <div class="mcap rv d4"><b>Offline mock mode</b><p>No key? Mock mode serves deterministic canned responses so you can demo and develop the full flow offline.</p></div>
+    <div class="mcap rv d5"><b>Reports stay local</b><p>Runs persist to a SQLite file on your server, so shareable /r/ links survive restarts without a third-party database.</p></div>
   </div>
   <div class="meshproof rv">
-    <code>POST https://api.meshapi.ai/v1/chat/completions &nbsp;<i>Authorization: Bearer rsk_...</i></code>
+    <code>docker run -p 8000:8000 -e <i>OPENROUTER_API_KEY=sk-or-...</i> agentbench</code>
   </div>
 </div></section>
 
 <section class="final"><div class="wrap">
   <img class="badgeimg rv" src="/api/badge.svg?label=demo&passed=5&total=5" alt="AgentBench quality badge">
   <h2 class="rv">Your users are already testing it.<br>Beat them to it.</h2>
-  <p class="sec-sub rv" style="margin:0 auto 32px">No signup. Six preloaded suites. A full run costs about half a cent.</p>
+  <p class="sec-sub rv" style="margin:0 auto 32px">Seven preloaded suites. Bring an OpenRouter key. A full run costs about half a cent.</p>
   <a class="cta big rv" href="/app">Run a benchmark now</a>
 </div></section>
 
 <footer><div class="wrap">
-  <span><b>AgentBench</b> &middot; built for the MeshAPI Hackathon, July 2026</span>
-  <span style="font-family:var(--mono)">test execution + judging + red team + fixes, all via MeshAPI</span>
+  <span><b>AgentBench</b> &middot; MIT licensed &middot; <a href="https://github.com/himanshu748/agentbench" style="color:inherit">github.com/himanshu748/agentbench</a></span>
+  <span style="font-family:var(--mono)">test execution + judging + red team + fixes, all via OpenRouter</span>
 </div></footer>
 
 <script>
@@ -362,7 +361,7 @@ function playGrid(){
 }
 playGrid();
 
-// live catalog count from the API (subline under the 1000+ marketing claim)
+// live catalog count from the API (subline under the headline number)
 fetch('/api/meta').then(r=>r.json()).then(m=>{
   if(m.model_count)document.getElementById('livecount').textContent=
     m.model_count+' in the live catalog ('+m.chat_count+' chat)';

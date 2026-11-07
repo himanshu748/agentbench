@@ -1,5 +1,10 @@
 .env
 .venv/
 __pycache__/
-.vercel/
 *.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+data/

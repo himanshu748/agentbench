@@ -1,15 +1,24 @@
 # Example: run AgentBench behavior tests on every PR that touches your prompt.
+# Add an OPENROUTER_API_KEY repository secret to enable it.
 name: prompt-ci
 on:
   pull_request:
     paths: ["prompts/**", "suites/**"]
+  workflow_dispatch:
 jobs:
   behavior-tests:
     runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Skip (no OPENROUTER_API_KEY secret, e.g. a fork PR)
+        if: env.HAS_KEY != 'true'
+        run: echo "OPENROUTER_API_KEY secret is not available; skipping behavior tests."
       - name: AgentBench
-        uses: ./  # or himanshu748/agentbench@v1 once published
+        if: env.HAS_KEY == 'true'
+        uses: ./  # in your repo: himanshu748/agentbench@v2
         with:
           suite: suites/customer-support.yaml
           models: openai/gpt-4o-mini,anthropic/claude-haiku-4.5
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
