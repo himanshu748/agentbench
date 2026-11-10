@@ -11,7 +11,7 @@ jobs:
     env:
       HAS_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Skip (no OPENROUTER_API_KEY secret, e.g. a fork PR)
         if: env.HAS_KEY != 'true'
         run: echo "OPENROUTER_API_KEY secret is not available; skipping behavior tests."
