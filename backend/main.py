@@ -115,12 +115,16 @@ def get_suite(suite_id: str):
 def create_suite(body: SuiteIn):
     try:
         suite = yaml.safe_load(body.yaml_text)
-        assert isinstance(suite, dict) and suite.get("tests"), "missing tests"
-        assert suite.get("system_prompt"), "missing system_prompt"
+        if not (isinstance(suite, dict) and suite.get("tests")):
+            raise ValueError("missing tests")
+        if not suite.get("system_prompt"):
+            raise ValueError("missing system_prompt")
         for t in suite["tests"]:
-            assert t.get("input") and t.get("category"), "each test needs input+category"
+            if not (t.get("input") and t.get("category")):
+                raise ValueError("each test needs input+category")
             if t["category"] == "custom":
-                assert t.get("rubric"), "custom category tests need a rubric field"
+                if not t.get("rubric"):
+                    raise ValueError("custom category tests need a rubric field")
             elif t["category"] not in judge.RUBRICS:
                 raise ValueError(f"unknown category: {t['category']}")
     except Exception as e:
@@ -280,7 +284,8 @@ async def redteam(body: RedTeamIn, request: Request):
         m = _re.search(r"\{.*\}", result["content"], _re.S)
         tests = _json.loads(m.group(0))["tests"]
         tests = [t for t in tests if t.get("input") and t.get("category") in judge.RUBRICS][:n]
-        assert tests
+        if not tests:
+            raise ValueError("no valid tests generated")
     except Exception:
         raise HTTPException(502, "red-team output could not be parsed") from None
     suite_id = "redteam-" + uuid.uuid4().hex[:8]
