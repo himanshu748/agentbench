@@ -35,7 +35,7 @@ runs:
           echo "::error::AgentBench needs either 'openrouter-api-key' (e.g. \${{ secrets.OPENROUTER_API_KEY }}) or 'url' of a self-hosted server."
           exit 1
         fi
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v7
       if: inputs.url == ''
       with:
         python-version: "3.12"
