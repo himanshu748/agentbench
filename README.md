@@ -8,7 +8,7 @@
 
 Open source and self-hosted: bring your own OpenRouter key, run it on your laptop, in Docker, or inside your GitHub Actions job.
 
-> **Note:** The hosted demo (`agentbench-three.vercel.app`) is retired, and the MeshAPI integration has been replaced by OpenRouter. If you're upgrading from 1.x, see the [changelog](CHANGELOG.md).
+> **Note:** The hosted demo (`agentbench-three.vercel.app`) is retired. If you're upgrading from 1.x, see the [changelog](CHANGELOG.md).
 
 ## Why
 
