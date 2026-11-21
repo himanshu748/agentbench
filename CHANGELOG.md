@@ -5,9 +5,9 @@
 The hosted demo is retired. AgentBench is now a self-hosted, open source project.
 
 ### Breaking
-- Model provider switched from MeshAPI to **OpenRouter**. Set `OPENROUTER_API_KEY`
-  (replaces `MESH_API_KEY`); `MESH_BASE_URL` / `MESH_JUDGE_MODEL` become
-  `OPENROUTER_BASE_URL` / `AGENTBENCH_JUDGE_MODEL`. `auto` now maps to `openrouter/auto`.
+- **OpenRouter** is now the model provider. Set `OPENROUTER_API_KEY` for live model calls.
+  Use `OPENROUTER_BASE_URL` to override the endpoint and `AGENTBENCH_JUDGE_MODEL`
+  to choose the judge model. `auto` now maps to `openrouter/auto`.
 - The CLI defaults to `http://localhost:8000` instead of the hosted demo.
 - The GitHub Action runs the engine inside the job and needs an `openrouter-api-key` input
   (or `url` of your own server). Use `himanshu748/agentbench@v2`.
@@ -27,4 +27,4 @@ The hosted demo is retired. AgentBench is now a self-hosted, open source project
 
 ## 1.0.0
 
-Initial release built for the MeshAPI Hackathon (July 2026).
+Initial release (July 2026).
