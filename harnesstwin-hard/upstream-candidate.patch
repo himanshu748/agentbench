@@ -1,6 +1,6 @@
 --- a/providers/gmicloud/models/deepseek-ai/DeepSeek-V4-Flash.toml
 +++ b/providers/gmicloud/models/deepseek-ai/DeepSeek-V4-Flash.toml
-@@ -12,7 +12,7 @@
+@@ -12,8 +12,8 @@
  compatibility = { reasoning_field = "reasoning_content" }
  
  [cost.text.input]
