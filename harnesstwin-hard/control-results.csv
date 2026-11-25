@@ -1,0 +1,3 @@
+kind,required_tests,passed_tests,official_reward,verifier_exit,agent_benchmark,job_id
+negative_control,46,41,0,1,false,6b0747edb6a90bbe997e674e
+positive_control,46,46,1,0,false,6b074829b6a90bbe997e67ad
