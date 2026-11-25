@@ -1,0 +1,14 @@
+--- a/providers/gmicloud/models/deepseek-ai/DeepSeek-V4-Flash.toml
++++ b/providers/gmicloud/models/deepseek-ai/DeepSeek-V4-Flash.toml
+@@ -12,7 +12,7 @@
+ compatibility = { reasoning_field = "reasoning_content" }
+ 
+ [cost.text.input]
+-price = 0.112
+-cache = { read = 0.022 }
++price = 0.14
++cache = { read = 0.028 }
+ 
+ [cost.text.output]
+-price = 0.224
++price = 0.28
